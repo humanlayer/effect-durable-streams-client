@@ -1,0 +1,25 @@
+{
+  "baseRef": "HEAD",
+  "oxlintConfigPath": "./diff-check.oxlintrc.json",
+  "sourceExtensions": [".ts", ".tsx"],
+  "excludePathPrefixes": ["dist/", "coverage/", "vendor/", "tools/"],
+  "changedFileRules": [
+    {
+      "rule": "diff/key-file-change",
+      "severity": "warning",
+      "matchers": [
+        {
+          "_tag": "Directory",
+          "path": "database/migrations/",
+          "message": "A database migration changed."
+        },
+        {
+          "_tag": "File",
+          "path": "config/runtime.ts",
+          "message": "Runtime configuration changed."
+        },
+        { "_tag": "File", "path": "bun.lock", "message": "The dependency lockfile changed." }
+      ]
+    }
+  ]
+}

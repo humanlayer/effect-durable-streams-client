@@ -46,8 +46,7 @@ export const sendOrdinaryBatch = (entries: ReadonlyArray<Entry>) => {
   const first = entries[0];
   if (first === undefined) return Effect.die("Empty ordinary append batch");
   if (first.executionContext === undefined) return Effect.fail(new AppendOutcomeUnknownError({}));
-  let seq: string | undefined;
-  for (const entry of entries) if (entry.seq !== undefined) seq = entry.seq;
+  const seq = entries.findLast((entry) => entry.seq !== undefined)?.seq;
   const send = appendStreamValue<typeof Schema.Json>({
     connection: first.connection,
     input: { value: null, ...Record.filter({ seq }, Predicate.isNotUndefined) },
@@ -72,7 +71,7 @@ export const runOrdinaryBurst = ({
 }: {
   readonly state: Ref.Ref<Burst | undefined>;
   readonly burst: Burst;
-}): Effect.Effect<void> =>
+}) =>
   Effect.gen(function* () {
     while (Arr.isReadonlyArrayNonEmpty(burst.active)) {
       const batch = burst.active;
@@ -144,7 +143,7 @@ export const allocateOrdinaryAppends = Effect.gen(function* () {
   const state = yield* Ref.make<Burst | undefined>(undefined);
   return <S extends Schema.Top>(
     context: LifecycleContext<S> & { readonly input: AppendInput<S["Type"] | Uint8Array> },
-  ): Effect.Effect<AppendResult, AppendError, HttpClient.HttpClient | S["EncodingServices"]> =>
+  ) =>
     Effect.contextWith((executionContext: Context.Context<HttpClient.HttpClient>) =>
       Effect.gen(function* () {
         if (context.connection.batching === false) return yield* appendStreamValue(context);
@@ -186,7 +185,7 @@ export const allocateOrdinaryAppends = Effect.gen(function* () {
                 yield* runOrdinaryBurst({ state, burst }).pipe(
                   Effect.interruptible,
                   Effect.forkIn(burst.scope),
-                  Effect.updateContext((_: Context.Context<never>) => Context.empty()),
+                  Effect.updateContext<never, never>(() => Context.empty()),
                 );
               yield* Effect.logDebug("Ordinary append admitted");
               return yield* restore(Deferred.await(entry.receipt)).pipe(
@@ -224,53 +223,54 @@ export const allocateOrdinaryAppends = Effect.gen(function* () {
     );
 });
 
-export const appendSource = <E, R>(context: {
+export const appendSource = Effect.fn("durable_streams.append_stream")(function* <E, R>(context: {
   readonly connection: DurableStreamsConnection;
   readonly hasSchema: boolean;
   readonly input: AppendStreamInput<E, R>;
-}): Effect.Effect<AppendResult, AppendError | E, HttpClient.HttpClient | R> =>
-  Effect.gen(function* () {
-    const scope = yield* Effect.scope;
-    const failed = yield* Deferred.make<never, E>();
-    const pull = yield* context.input.source.pipe(
-      Stream.map((chunk) => (Predicate.isString(chunk) ? new TextEncoder().encode(chunk) : chunk)),
-      Stream.catchCause((cause) =>
-        Stream.fromEffect(
-          Deferred.failCause(failed, cause).pipe(Effect.andThen(Effect.failCause(cause))),
-        ),
+}) {
+  const scope = yield* Effect.scope;
+  const failed = yield* Deferred.make<never, E>();
+  const pull = yield* context.input.source.pipe(
+    Stream.map((chunk) => (Predicate.isString(chunk) ? new TextEncoder().encode(chunk) : chunk)),
+    Stream.catchCause((cause) =>
+      Stream.fromEffect(
+        Deferred.failCause(failed, cause).pipe(Effect.andThen(Effect.failCause(cause))),
       ),
-      Stream.toPull,
-    );
-    const bodyStream = Stream.fromPull(
-      Effect.gen(function* () {
-        const consumer = yield* Effect.fiber;
-        yield* Scope.addFinalizer(
-          scope,
-          Effect.withFiber((current) =>
-            current.id === consumer.id ? Effect.interrupt : Fiber.interrupt(consumer),
-          ),
-        );
-        return pull.pipe(Effect.forkIn(scope), Effect.flatMap(Fiber.join));
-      }),
-    );
-    const contentType =
-      context.connection.contentType ??
-      (context.hasSchema ? "application/json" : "application/octet-stream");
-    return yield* appendStreamValue<typeof Schema.Json>({
-      connection: context.connection,
-      input: {
-        value: null,
-        ...Record.filter({ seq: context.input.seq }, Predicate.isNotUndefined),
-      },
-      prepared: { bodyStream, contentType },
-    }).pipe(
-      Effect.catch((error) =>
-        Deferred.poll(failed).pipe(
-          Effect.flatMap((failure): Effect.Effect<never, E | AppendError> =>
-            Option.isNone(failure) ? Effect.fail(error) : failure.value,
-          ),
+    ),
+    Stream.toPull,
+  );
+  const bodyStream = Stream.fromPull(
+    Effect.gen(function* () {
+      const consumer = yield* Effect.fiber;
+      return yield* Scope.addFinalizer(
+        scope,
+        Effect.withFiber((current) =>
+          current.id === consumer.id ? Effect.interrupt : Fiber.interrupt(consumer),
         ),
+      ).pipe(Effect.map(() => pull.pipe(Effect.forkIn(scope), Effect.flatMap(Fiber.join))));
+    }),
+  );
+  const contentType =
+    context.connection.contentType ??
+    (context.hasSchema ? "application/json" : "application/octet-stream");
+  return yield* appendStreamValue<typeof Schema.Json>({
+    connection: context.connection,
+    input: {
+      value: null,
+      ...Record.filter({ seq: context.input.seq }, Predicate.isNotUndefined),
+    },
+    prepared: { bodyStream, contentType },
+  }).pipe(
+    Effect.catch((error) =>
+      Deferred.poll(failed).pipe(
+        Effect.flatMap((failure) => {
+          const outcome: Effect.Effect<never, E | AppendError> = Option.isNone(failure)
+            ? Effect.fail(error)
+            : failure.value;
+          return outcome;
+        }),
       ),
-      Effect.raceFirst(Deferred.await(failed)),
-    );
-  }).pipe(Effect.scoped, Effect.withSpan("durable_streams.append_stream"));
+    ),
+    Effect.raceFirst(Deferred.await(failed)),
+  );
+}, Effect.scoped);

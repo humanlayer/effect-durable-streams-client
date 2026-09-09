@@ -31,6 +31,7 @@ export const checkExtensions = (connection: DurableStreamsConnection) =>
         issues: ["Invalid HTTP header"],
       });
     }
+    return undefined;
   });
 
 export type RequestInput = {

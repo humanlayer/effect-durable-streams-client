@@ -133,6 +133,7 @@ describe("reference ordinary batching", () => {
           }
           for (const fiber of fibers) yield* Fiber.join(fiber);
           expect(yield* Ref.get(http.active)).toBe(0);
+          return undefined;
         }).pipe(Effect.provide(http.layer));
       }),
     );

@@ -26,7 +26,7 @@ export const AdapterCommand = Schema.Union([
     type: Schema.Literal("create"),
     path: Schema.String,
     contentType: Schema.optionalKey(Schema.String),
-    ttlSeconds: Schema.optionalKey(Schema.Number),
+    ttlSeconds: Schema.optionalKey(Schema.Finite),
     expiresAt: Schema.optionalKey(Schema.String),
     headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
     closed: Schema.optionalKey(Schema.Boolean),
@@ -37,7 +37,7 @@ export const AdapterCommand = Schema.Union([
     path: Schema.String,
     data: Schema.String,
     binary: Schema.optionalKey(Schema.Boolean),
-    seq: Schema.optionalKey(Schema.Number),
+    seq: Schema.optionalKey(Schema.Finite),
     headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   }),
   Schema.Struct({
@@ -493,6 +493,7 @@ export const runAdapter = Effect.gen(function* () {
     ),
   );
 }).pipe(
+  // oxlint-disable-next-line effecttsgo/strict-effect-provide -- SAFETY: this is the adapter application composition root.
   Effect.provide(
     Layer.mergeAll(
       FetchHttpClient.layer,

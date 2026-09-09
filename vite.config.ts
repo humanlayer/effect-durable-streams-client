@@ -13,6 +13,12 @@ export default defineConfig({
   },
   lint: {
     extends: [recommended],
+    overrides: [
+      {
+        files: ["tests/**/*.test.ts"],
+        rules: { "effecttsgo/strict-effect-provide": "off" },
+      },
+    ],
     options: {
       typeAware: true,
       typeCheck: true,
@@ -42,11 +48,16 @@ export default defineConfig({
       "tools/oxlint/automation/**",
     ],
     rules: {
+      ...Object.fromEntries(
+        Object.keys(recommended.rules ?? {}).map((rule) => [rule, "error" as const]),
+      ),
+      "effecttsgo/strict-effect-provide": "error",
+      "no-underscore-dangle": "off",
       "no-console": "error",
       "no-empty": "error",
-      "no-empty-function": "warn",
+      "no-empty-function": "error",
       "no-eq-null": "error",
-      "no-unused-vars": "warn",
+      "no-unused-vars": "error",
       "unicorn/filename-case": "error",
       "require-yield": "off",
       "no-shadow": "off",
@@ -135,7 +146,7 @@ export default defineConfig({
     },
     categories: {
       correctness: "error",
-      suspicious: "warn",
+      suspicious: "error",
     },
     settings: {
       "better-tailwindcss": {

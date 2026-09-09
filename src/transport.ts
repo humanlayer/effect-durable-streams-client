@@ -48,15 +48,14 @@ export type SnapshotInput = {
 const _snapshotResponse = (input: SnapshotInput) =>
   Effect.gen(function* () {
     const cap = 64 * 1024;
-    let bytes = new Uint8Array(0);
-    let length = 0;
+    const body = { bytes: new Uint8Array(0), length: 0 };
     const interruptedBody = yield* input.response.stream.pipe(
       Stream.takeUntil((chunk) => {
-        if (chunk.length > 0 && bytes.length === 0) bytes = new Uint8Array(cap + 1);
-        const part = chunk.subarray(0, bytes.length - length);
-        bytes.set(part, length);
-        length += part.length;
-        return length > cap;
+        if (chunk.length > 0 && body.bytes.length === 0) body.bytes = new Uint8Array(cap + 1);
+        const part = chunk.subarray(0, body.bytes.length - body.length);
+        body.bytes.set(part, body.length);
+        body.length += part.length;
+        return body.length > cap;
       }),
       Stream.runDrain,
       Effect.as(false),
@@ -91,11 +90,11 @@ const _snapshotResponse = (input: SnapshotInput) =>
       url,
       headers,
       body:
-        length === 0 && !interruptedBody
+        body.length === 0 && !interruptedBody
           ? ErrorResponseBody.cases.Empty.make({})
           : ErrorResponseBody.cases.Bytes.make({
-              value: bytes.slice(0, Math.min(length, cap)),
-              truncated: length > cap || interruptedBody,
+              value: body.bytes.slice(0, Math.min(body.length, cap)),
+              truncated: body.length > cap || interruptedBody,
               ...Record.filter({ contentType }, Predicate.isNotUndefined),
             }),
     });

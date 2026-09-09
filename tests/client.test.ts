@@ -152,9 +152,7 @@ describe("construction and API types", () => {
       >().toEqualTypeOf<false>();
       for (const input of [custom, raw, { url: custom.url, schema: "invalid" }]) {
         const erased: { readonly url: string } = input;
-        const result = yield* Effect.gen(function* () {
-          return yield* DurableStreamsClient;
-        }).pipe(
+        const result = yield* Effect.service(DurableStreamsClient).pipe(
           Effect.provide(DurableStreamsClient.layer(erased)),
           Effect.catchTag("InvalidDurableStreamsConfigError", (error) =>
             Effect.succeed(error.field),

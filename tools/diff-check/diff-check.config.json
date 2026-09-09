@@ -6,7 +6,7 @@
   "changedFileRules": [
     {
       "rule": "diff/key-file-change",
-      "severity": "warning",
+      "severity": "error",
       "matchers": [
         {
           "_tag": "Directory",

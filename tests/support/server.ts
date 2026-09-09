@@ -9,13 +9,16 @@ export class TestServerStopError extends Data.TaggedError("TestServerStopError")
 }> {}
 
 export const acquireDurableStreamServer = Effect.acquireRelease(
-  Effect.tryPromise({
-    try: async () => {
-      const server = new DurableStreamTestServer({ port: 0, longPollTimeout: 500 });
-      const baseUrl = await server.start();
-      return { server, baseUrl };
-    },
-    catch: (cause) => new TestServerStartError({ cause }),
+  Effect.gen(function* () {
+    const server = yield* Effect.try({
+      try: () => new DurableStreamTestServer({ port: 0, longPollTimeout: 500 }),
+      catch: (cause) => new TestServerStartError({ cause }),
+    });
+    const baseUrl = yield* Effect.tryPromise({
+      try: () => server.start(),
+      catch: (cause) => new TestServerStartError({ cause }),
+    });
+    return { server, baseUrl };
   }),
   ({ server }) =>
     Effect.tryPromise({

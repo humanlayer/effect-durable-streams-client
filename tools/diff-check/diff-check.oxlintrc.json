@@ -1,8 +1,9 @@
 {
   "$schema": "../../node_modules/oxlint/configuration_schema.json",
   "jsPlugins": ["./src/plugin.ts"],
+  "categories": { "correctness": "error" },
   "rules": {
-    "diff-check/no-explicit-function-return-type": "warn",
-    "diff-check/no-let": "warn"
+    "diff-check/no-explicit-function-return-type": "error",
+    "diff-check/no-let": "error"
   }
 }

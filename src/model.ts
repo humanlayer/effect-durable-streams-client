@@ -28,6 +28,7 @@ export const DurableStreamsConnection = Schema.Struct({
       maxRetries: Schema.optionalKey(
         Schema.Union([
           Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+          // oxlint-disable-next-line effecttsgo/schema-number -- SAFETY: positive Infinity is the supported unlimited retry sentinel.
           Schema.Number.check(Schema.makeFilter((value) => value === Infinity)),
         ]),
       ),

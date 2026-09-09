@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import {
   Clock,
+  DateTime,
   Duration,
   Effect,
   Fiber,
@@ -292,7 +293,12 @@ describe("HEAD and connect", () => {
       const http = yield* makeScriptedHttpClient;
       const client = yield* DurableStreamsClient.make({ url: "https://streams.test/orders" });
       const now = yield* Clock.currentTimeMillis;
-      for (const retryAfter of [new Date(now + 5000).toUTCString(), "nonsense", "-1", "1.5"]) {
+      for (const retryAfter of [
+        DateTime.toDateUtc(DateTime.makeUnsafe(now + 5000)).toUTCString(),
+        "nonsense",
+        "-1",
+        "1.5",
+      ]) {
         yield* http.respond(
           ScriptedResponse.Response({ status: 429, headers: { "retry-after": retryAfter } }),
         );

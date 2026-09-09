@@ -4,11 +4,13 @@ import {
   DateTime,
   Duration,
   Effect,
+  Exit,
   Match,
   Option,
   Predicate,
   Record,
   Schema,
+  Scope,
   Stream,
 } from "effect";
 import { HttpClient, type HttpClientError, type HttpClientResponse } from "effect/unstable/http";
@@ -25,6 +27,9 @@ import {
 } from "./errors.ts";
 import { StreamMetadata, type DurableStreamsConnection } from "./model.ts";
 import { parseHeadMetadata } from "./protocol.ts";
+import { buildRequest, type RequestInput } from "./request.ts";
+import { parseRetryAfter, requestRetrySchedule } from "./retry.ts";
+import { captureSchemaFailure } from "./encoding.ts";
 
 class HeadTransportFailure extends Data.TaggedError("HeadTransportFailure")<{
   readonly cause: HttpClientError.HttpClientError;
@@ -37,30 +42,33 @@ class HeadResponseFailure extends Data.TaggedError("HeadResponseFailure")<{
 export type SnapshotInput = {
   readonly response: HttpClientResponse.HttpClientResponse;
   readonly url: string;
+  readonly operation?: string;
 };
 
 const _snapshotResponse = (input: SnapshotInput) =>
   Effect.gen(function* () {
     const cap = 64 * 1024;
-    const bytes = new Uint8Array(cap + 1);
+    let bytes = new Uint8Array(0);
     let length = 0;
-    let interruptedBody = false;
-    yield* input.response.stream.pipe(
+    const interruptedBody = yield* input.response.stream.pipe(
       Stream.takeUntil((chunk) => {
+        if (chunk.length > 0 && bytes.length === 0) bytes = new Uint8Array(cap + 1);
         const part = chunk.subarray(0, bytes.length - length);
         bytes.set(part, length);
         length += part.length;
         return length > cap;
       }),
       Stream.runDrain,
+      Effect.as(false),
+      Effect.catchReason("HttpClientError", "EmptyBodyError", () => Effect.succeed(false)),
       Effect.catchTag("HttpClientError", () =>
         Effect.gen(function* () {
-          interruptedBody = true;
           yield* Effect.logWarning("Unable to finish error response snapshot", {
-            operation: "HEAD",
+            operation: input.operation ?? "HEAD",
             status: input.response.status,
             url: input.url,
           });
+          return true;
         }),
       ),
     );
@@ -78,7 +86,7 @@ const _snapshotResponse = (input: SnapshotInput) =>
       Effect.map((url) => url.origin + url.pathname),
       Effect.catchTag("SchemaError", () => Effect.succeed(input.url)),
     );
-    return ErrorResponse.make({
+    const snapshot = ErrorResponse.make({
       status: input.response.status,
       url,
       headers,
@@ -91,7 +99,22 @@ const _snapshotResponse = (input: SnapshotInput) =>
               ...Record.filter({ contentType }, Predicate.isNotUndefined),
             }),
     });
+    return snapshot;
   });
+
+export const protocolViolation = (input: {
+  readonly response: HttpClientResponse.HttpClientResponse;
+  readonly component: string;
+}) =>
+  _snapshotResponse({
+    response: input.response,
+    url: "[REDACTED]",
+    operation: input.component,
+  }).pipe(
+    Effect.flatMap((response) =>
+      Effect.fail(new ProtocolViolationError({ component: input.component, response })),
+    ),
+  );
 
 export type HeadInput = {
   readonly connection: DurableStreamsConnection;
@@ -106,9 +129,12 @@ export const inspectStream = (
   return Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient;
     const response = yield* HttpClient.withScope(http)
-      .head(input.connection.url.href)
+      .execute(buildRequest({ connection: input.connection, method: "HEAD" }))
       .pipe(
         Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
+        Effect.catchReason("HttpClientError", "StatusCodeError", (reason) =>
+          Effect.succeed(reason.response),
+        ),
         Effect.mapError((cause) => new HeadTransportFailure({ cause })),
       );
     if (response.status === 404) return StreamMetadata.cases.Missing.make({});
@@ -118,11 +144,11 @@ export const inspectStream = (
       requiresJson: input.operation === "connect" && input.hasSchema === true,
     }).pipe(
       Effect.tapError((failure) =>
-        Effect.logWarning("Invalid stream metadata", {
+        captureSchemaFailure({
+          cause: failure.cause,
           operation: input.operation,
-          url,
-          status: response.status,
           component: failure.component,
+          metadata: true,
         }),
       ),
       Effect.catchTag("HeadMetadataFailure", (failure) =>
@@ -192,25 +218,89 @@ export const inspectStream = (
           );
         }),
     }),
-    Effect.tapError((error) =>
-      Effect.sync(() => {
-        if (error.response !== undefined) {
-          if (ErrorResponseBody.guards.Bytes(error.response.body)) {
-            const captured = error.response.body.value.slice();
-            Object.defineProperty(error.response.body, "value", {
-              enumerable: true,
-              get: () => captured.slice(),
-            });
-          }
-          Object.freeze(error.response.headers);
-          Object.freeze(error.response.body);
-          Object.freeze(error.response);
-        }
-      }),
-    ),
+    Effect.tapError(freezeErrorResponse),
     Effect.scoped,
     Effect.withSpan(`durable_streams.${input.operation}`, {
       attributes: { operation: input.operation, url },
+    }),
+  );
+};
+
+export class MutationFailure extends Data.TaggedError("MutationFailure")<{
+  readonly response?: ErrorResponse;
+  readonly cause?: HttpClientError.HttpClientError;
+  readonly retryAfter?: Duration.Duration;
+  readonly retryable: boolean;
+}> {}
+
+export const freezeErrorResponse = (error: { readonly response?: ErrorResponse }) =>
+  Effect.sync(() => {
+    const response = error.response;
+    if (response === undefined) return;
+    if (ErrorResponseBody.guards.Bytes(response.body)) {
+      const captured = response.body.value.slice();
+      Object.defineProperty(response.body, "value", {
+        enumerable: true,
+        get: () => captured.slice(),
+      });
+    }
+    Object.freeze(response.headers);
+    Object.freeze(response.body);
+    Object.freeze(response);
+  });
+
+export type MutationRequest = RequestInput & {
+  readonly operation: "create" | "append" | "close" | "delete";
+  readonly safe: boolean;
+};
+
+export const sendMutation = (input: MutationRequest) => {
+  const url = input.connection.url.origin + input.connection.url.pathname;
+  return Effect.gen(function* () {
+    const parentScope = yield* Effect.scope;
+    const attemptScope = yield* Scope.fork(parentScope);
+    return yield* Effect.gen(function* () {
+      const http = yield* HttpClient.HttpClient;
+      const response = yield* HttpClient.withScope(http)
+        .execute(buildRequest(input))
+        .pipe(
+          Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
+          Effect.catchReason("HttpClientError", "StatusCodeError", (reason) =>
+            Effect.succeed(reason.response),
+          ),
+          Effect.mapError((cause) => new MutationFailure({ cause, retryable: true })),
+        );
+      if (response.status >= 200 && response.status < 300) return response;
+      const snapshot = yield* _snapshotResponse({ response, url, operation: input.operation });
+      const retryAfter = yield* parseRetryAfter(response.headers["retry-after"]);
+      return yield* new MutationFailure({
+        response: snapshot,
+        ...Record.filter(
+          { retryAfter: Option.getOrUndefined(retryAfter) },
+          Predicate.isNotUndefined,
+        ),
+        retryable:
+          (response.status === 429 || response.status >= 500 || response.status < 400) &&
+          !(response.status === 501 && input.operation !== "create"),
+      });
+    }).pipe(
+      Effect.provideService(Scope.Scope, attemptScope),
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit) ? Scope.close(attemptScope, exit) : Effect.void,
+      ),
+    );
+  }).pipe(
+    Effect.tapError((failure) =>
+      Effect.logWarning("Stream mutation request failed", {
+        operation: input.operation,
+        url,
+        status: failure.response?.status,
+        transport: failure.cause?.reason._tag,
+      }),
+    ),
+    Effect.retry({
+      while: (failure) => input.safe && failure.retryable,
+      schedule: requestRetrySchedule(input.connection),
     }),
   );
 };

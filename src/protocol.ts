@@ -15,6 +15,11 @@ export const CLOSED = "stream-closed";
 export const TTL = "stream-ttl";
 export const EXPIRES_AT = "stream-expires-at";
 
+export const WriteHeaders = Schema.Struct({
+  "stream-next-offset": Offset.check(Schema.isPattern(/^(?!-1$|now$)/)),
+  "stream-closed": Schema.optionalKey(Schema.Literals(["true", "false"])),
+});
+
 export class HeadMetadataFailure extends Data.TaggedError("HeadMetadataFailure")<{
   readonly component: string;
   readonly cause: Schema.SchemaError | SchemaIssue.Issue;

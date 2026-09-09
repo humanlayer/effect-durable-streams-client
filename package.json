@@ -41,6 +41,7 @@
   "devDependencies": {
     "@durable-streams/client-conformance-tests": "0.2.12",
     "@durable-streams/server": "0.3.8",
+    "@effect/platform-node": "4.0.0-rc.112",
     "@effect/tsgo": "^0.38.0",
     "@effect/vitest": "4.0.0-rc.112",
     "@oxlint/plugins": "^1.80.0",

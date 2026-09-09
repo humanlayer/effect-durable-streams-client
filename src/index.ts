@@ -1,19 +1,61 @@
-import { Context, Effect, Layer, Option, Ref, Schema, Stream } from "effect";
+import { Context, Effect, Layer, Option, Ref, Schema, Stream, Match } from "effect";
 import type { HttpClient } from "effect/unstable/http";
-import { InvalidDurableStreamsConfigError } from "./errors.ts";
+import {
+  InvalidDurableStreamsConfigError,
+  type AppendError,
+  type CloseError,
+  type CreateError,
+  type DeleteError,
+  type HeadError,
+} from "./errors.ts";
 import {
   DurableStreamsConnection,
   type DurableStreamsClientConfig,
   type DurableStreamsClientLayerConfig,
   type Offset,
+  type AppendInput,
+  type CloseInput,
+  type CreateInput,
+  type AppendResult,
+  type CloseResult,
+  type CreateResult,
+  type StreamMetadata,
 } from "./model.ts";
 import { inspectStream } from "./transport.ts";
+import { checkExtensions } from "./request.ts";
+import { appendStreamValue, closeStream, createStream, deleteStream } from "./lifecycle.ts";
 
 export * from "./model.ts";
 export * from "./errors.ts";
 
-const _make = <S extends Schema.Top = typeof Schema.Json>(config: DurableStreamsClientConfig<S>) =>
-  Effect.gen(function* () {
+export type Client<S extends Schema.Top, A = S["Type"]> = {
+  readonly head: Effect.Effect<StreamMetadata, HeadError, HttpClient.HttpClient>;
+  readonly connect: Effect.Effect<StreamMetadata, HeadError, HttpClient.HttpClient>;
+  readonly create: (
+    input: CreateInput<A>,
+  ) => Effect.Effect<CreateResult, CreateError, HttpClient.HttpClient | S["EncodingServices"]>;
+  readonly append: (
+    input: AppendInput<A>,
+  ) => Effect.Effect<AppendResult, AppendError, HttpClient.HttpClient | S["EncodingServices"]>;
+  readonly close: (
+    input: CloseInput<A>,
+  ) => Effect.Effect<CloseResult, CloseError, HttpClient.HttpClient | S["EncodingServices"]>;
+  readonly delete: Effect.Effect<void, DeleteError, HttpClient.HttpClient>;
+  readonly offset: Effect.Effect<Option.Option<Offset>>;
+  readonly json: Stream.Stream<S["Type"], never, HttpClient.HttpClient | S["DecodingServices"]>;
+};
+
+function _make(
+  config: DurableStreamsClientLayerConfig,
+): Effect.Effect<
+  Client<typeof Schema.Json, Schema.Json | Uint8Array>,
+  InvalidDurableStreamsConfigError
+>;
+function _make<S extends Schema.Top>(
+  config: DurableStreamsClientConfig<S>,
+): Effect.Effect<Client<S>, InvalidDurableStreamsConfigError>;
+function _make<S extends Schema.Top = typeof Schema.Json>(config: DurableStreamsClientConfig<S>) {
+  return Effect.gen(function* () {
     const connection = yield* Schema.decodeEffect(DurableStreamsConnection)(config).pipe(
       Effect.mapError(
         () =>
@@ -29,6 +71,7 @@ const _make = <S extends Schema.Top = typeof Schema.Json>(config: DurableStreams
         issues: ["Expected HTTP or HTTPS"],
       });
     }
+    yield* checkExtensions(connection);
     if (config.schema !== undefined && !Schema.isSchema(config.schema)) {
       return yield* new InvalidDurableStreamsConfigError({
         field: "schema",
@@ -48,23 +91,61 @@ const _make = <S extends Schema.Top = typeof Schema.Json>(config: DurableStreams
     const offset = yield* Ref.make<Option.Option<Offset>>(Option.none());
     const json: Stream.Stream<S["Type"], never, HttpClient.HttpClient | S["DecodingServices"]> =
       Stream.die("Durable Streams JSON reads are not implemented until Phase 4");
+    const currentConnection = yield* Ref.make(connection);
     return {
+      create: (input: CreateInput<S["Type"] | Uint8Array>) =>
+        Ref.get(currentConnection).pipe(
+          Effect.flatMap((connection) =>
+            createStream({ connection, schema: config.schema, input }),
+          ),
+          Effect.tap((result) =>
+            Ref.update(currentConnection, (current) => ({
+              ...current,
+              contentType: result.contentType,
+            })),
+          ),
+        ),
+      append: (input: AppendInput<S["Type"] | Uint8Array>) =>
+        Ref.get(currentConnection).pipe(
+          Effect.flatMap((connection) =>
+            appendStreamValue({ connection, schema: config.schema, input }),
+          ),
+        ),
+      close: (input: CloseInput<S["Type"] | Uint8Array>) =>
+        Ref.get(currentConnection).pipe(
+          Effect.flatMap((connection) => closeStream({ connection, schema: config.schema, input })),
+        ),
+      delete: deleteStream(connection),
       head: inspectStream({ connection, operation: "head" }),
       connect: inspectStream({
         connection,
         operation: "connect",
         hasSchema: config.schema !== undefined,
-      }),
+      }).pipe(
+        Effect.tap((metadata) =>
+          Match.value(metadata).pipe(
+            Match.tagsExhaustive({
+              Missing: () => Effect.void,
+              Existing: (result) =>
+                Ref.update(currentConnection, (current) => ({
+                  ...current,
+                  contentType: result.contentType,
+                })),
+            }),
+          ),
+        ),
+      ),
       offset: Ref.get(offset).pipe(Effect.withSpan("durable_streams.offset")),
       json,
     };
   }).pipe(Effect.withSpan("durable_streams.make"));
+}
 
 const LayerSchemaPolicy = Schema.Struct({ schema: Schema.optionalKey(Schema.Never) });
 
 export class DurableStreamsClient extends Context.Service<
   DurableStreamsClient,
-  Effect.Success<ReturnType<typeof _make<typeof Schema.Json>>>
+  Client<typeof Schema.Json, Schema.Json | Uint8Array>
 >()("effect-durable-streams/DurableStreamsClient") {
   static readonly make = _make;
 
@@ -81,7 +162,7 @@ export class DurableStreamsClient extends Context.Service<
               ],
             }),
         ),
-        Effect.andThen(() => _make<typeof Schema.Json>(config)),
+        Effect.andThen(() => _make(config)),
       ),
     );
 }

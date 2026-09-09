@@ -1,14 +1,11 @@
-import { spawn } from "node:child_process";
+import { NodeServices } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
-import { Data, Effect, Layer, Schema } from "effect";
+import { Deferred, Effect, Fiber, Layer, Schema, Stream } from "effect";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { FetchHttpClient } from "effect/unstable/http";
 import { acquireDurableStreamServer } from "../support/server.ts";
 import { AdapterState } from "./adapter-state.ts";
 import { AdapterCommand, processLine } from "./adapter.ts";
-
-export class AdapterProcessError extends Data.TaggedError("AdapterProcessError")<{
-  readonly cause: unknown;
-}> {}
 
 export type AdapterInvocation = {
   readonly commands: ReadonlyArray<AdapterCommand>;
@@ -20,33 +17,69 @@ const _invokeAdapter = (input: AdapterInvocation) =>
     const encoded = yield* Effect.forEach(input.commands, (command) =>
       Schema.encodeEffect(Schema.fromJsonString(AdapterCommand))(command),
     );
-    return yield* Effect.callback<
-      { readonly code: number | null; readonly stdout: string; readonly stderr: string },
-      AdapterProcessError
-    >((resume) => {
-      const process = spawn("./tests/conformance/run-adapter.sh", [], { stdio: "pipe" });
-      let stdout = "";
-      let stderr = "";
-      process.stdout.setEncoding("utf8");
-      process.stderr.setEncoding("utf8");
-      process.stdout.on("data", (chunk: string) => {
-        stdout += chunk;
-      });
-      process.stderr.on("data", (chunk: string) => {
-        stderr += chunk;
-      });
-      process.on("error", (cause) => resume(Effect.fail(new AdapterProcessError({ cause }))));
-      process.stdin.on("error", (cause) => resume(Effect.fail(new AdapterProcessError({ cause }))));
-      process.on("close", (code) => resume(Effect.succeed({ code, stdout, stderr })));
-      process.stdin.write(encoded.join("\n") + "\n");
-      if (input.closeInput) process.stdin.end();
-      return Effect.sync(() => {
-        process.kill();
-      });
-    });
-  });
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const child = yield* spawner.spawn(
+      ChildProcess.make("./tests/conformance/run-adapter.sh", [], {
+        stdin: {
+          stream: Stream.make(new TextEncoder().encode(encoded.join("\n") + "\n")),
+          endOnDone: input.closeInput,
+        },
+      }),
+    );
+    return yield* Effect.all(
+      {
+        code: child.exitCode,
+        stdout: child.stdout.pipe(
+          Stream.decodeText(),
+          Stream.runFold(
+            () => "",
+            (a, b) => a + b,
+          ),
+        ),
+        stderr: child.stderr.pipe(
+          Stream.decodeText(),
+          Stream.runFold(
+            () => "",
+            (a, b) => a + b,
+          ),
+        ),
+      },
+      { concurrency: 3 },
+    );
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
 describe("Phase 1 conformance adapter", () => {
+  it.effect("terminates the adapter when its owning fiber is interrupted", () =>
+    Effect.gen(function* () {
+      const ready = yield* Deferred.make<ChildProcessSpawner.ChildProcessHandle>();
+      const owner = yield* Effect.gen(function* () {
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const child = yield* spawner.spawn(
+          ChildProcess.make("./tests/conformance/run-adapter.sh", [], {
+            stdin: {
+              stream: Stream.make(
+                new TextEncoder().encode('{"type":"init","serverUrl":"http://localhost:1"}\n'),
+              ),
+              endOnDone: false,
+            },
+          }),
+        );
+        yield* child.stdout.pipe(
+          Stream.decodeText(),
+          Stream.splitLines,
+          Stream.take(1),
+          Stream.runDrain,
+        );
+        yield* Deferred.succeed(ready, child);
+        return yield* Effect.never;
+      }).pipe(Effect.scoped, Effect.forkChild);
+      const child = yield* Deferred.await(ready);
+      expect(yield* child.isRunning).toBe(true);
+      yield* Fiber.interrupt(owner);
+      expect(yield* child.isRunning).toBe(false);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect(
     "parses and serializes commands, rejects malformed input, and stays uninitialized until init",
     () =>

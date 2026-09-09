@@ -1,9 +1,9 @@
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { Data, Effect, Layer, Logger, Match, Predicate, Record, Schema, Stream } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import type { TestResult } from "@durable-streams/client-conformance-tests/protocol";
-import { DurableStreamsClient } from "../../src/index.ts";
+import { DurableStreamsClient, StreamLifetime, StreamMetadata } from "../../src/index.ts";
 import { AdapterState } from "./adapter-state.ts";
 
 export class AdapterInputError extends Data.TaggedError("AdapterInputError")<{
@@ -12,8 +12,57 @@ export class AdapterInputError extends Data.TaggedError("AdapterInputError")<{
 
 export const AdapterCommand = Schema.Union([
   Schema.Struct({ type: Schema.Literal("init"), serverUrl: Schema.String }),
-  Schema.Struct({ type: Schema.Literal("head"), path: Schema.String }),
-  Schema.Struct({ type: Schema.Literal("connect"), path: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literal("head"),
+    path: Schema.String,
+    headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("connect"),
+    path: Schema.String,
+    headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("create"),
+    path: Schema.String,
+    contentType: Schema.optionalKey(Schema.String),
+    ttlSeconds: Schema.optionalKey(Schema.Number),
+    expiresAt: Schema.optionalKey(Schema.String),
+    headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+    closed: Schema.optionalKey(Schema.Boolean),
+    data: Schema.optionalKey(Schema.String),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("append"),
+    path: Schema.String,
+    data: Schema.String,
+    binary: Schema.optionalKey(Schema.Boolean),
+    seq: Schema.optionalKey(Schema.Number),
+    headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("close"),
+    path: Schema.String,
+    data: Schema.optionalKey(Schema.String),
+    contentType: Schema.optionalKey(Schema.String),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("delete"),
+    path: Schema.String,
+    headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("set-dynamic-header"),
+    name: Schema.String,
+    valueType: Schema.Literals(["counter", "timestamp", "token"]),
+    initialValue: Schema.optionalKey(Schema.String),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("set-dynamic-param"),
+    name: Schema.String,
+    valueType: Schema.Literals(["counter", "timestamp"]),
+  }),
+  Schema.Struct({ type: Schema.Literal("clear-dynamic") }),
   Schema.Struct({ type: Schema.Literal("shutdown") }),
 ]).pipe(Schema.toTaggedUnion("type"));
 export type AdapterCommand = typeof AdapterCommand.Type;
@@ -37,7 +86,7 @@ export const handleCommand = (command: AdapterCommand) =>
                   longPoll: false,
                   auto: false,
                   streaming: false,
-                  dynamicHeaders: false,
+                  dynamicHeaders: true,
                   retryOptions: false,
                   batchItems: false,
                   strictZeroValidation: false,
@@ -48,9 +97,54 @@ export const handleCommand = (command: AdapterCommand) =>
       shutdown: () => Effect.succeed({ type: "shutdown", success: true } satisfies TestResult),
       head: (input) => _inspect(input),
       connect: (input) => _inspect(input),
+      create: (input) => _mutate(input),
+      append: (input) => _mutate(input),
+      close: (input) => _mutate(input),
+      delete: (input) => _mutate(input),
+      "set-dynamic-header": (input) =>
+        state
+          .setHeader(input)
+          .pipe(Effect.as({ type: "set-dynamic-header", success: true } satisfies TestResult)),
+      "set-dynamic-param": (input) =>
+        state
+          .setParam(input)
+          .pipe(Effect.as({ type: "set-dynamic-param", success: true } satisfies TestResult)),
+      "clear-dynamic": () =>
+        state.clear.pipe(Effect.as({ type: "clear-dynamic", success: true } satisfies TestResult)),
     });
   }).pipe(
     Effect.catchTags({
+      InvalidDurableStreamsConfigError: () =>
+        _commandError({ command, errorCode: "INVALID_ARGUMENT" }),
+      PayloadEncodeError: () => _commandError({ command, errorCode: "INVALID_ARGUMENT" }),
+      CreateConflictError: (error) =>
+        _commandError({ command, errorCode: "CONFLICT", status: error.response.status }),
+      AppendConflictError: (error) =>
+        _commandError({ command, errorCode: "SEQUENCE_CONFLICT", status: error.response.status }),
+      StreamClosedError: (error) =>
+        _commandError({ command, errorCode: "STREAM_CLOSED", status: error.response.status }),
+      StreamNotFoundError: (error) =>
+        _commandError({ command, errorCode: "NOT_FOUND", status: error.response.status }),
+      InvalidRequestError: (error) =>
+        _commandError({ command, errorCode: "INVALID_ARGUMENT", status: error.response.status }),
+      PayloadTooLargeError: (error) =>
+        _commandError({ command, errorCode: "PAYLOAD_TOO_LARGE", status: error.response.status }),
+      OperationNotSupportedError: (error) =>
+        _commandError({ command, errorCode: "NOT_SUPPORTED", status: error.response.status }),
+      UnauthorizedError: (error) =>
+        _commandError({ command, errorCode: "UNAUTHORIZED", status: error.response.status }),
+      ForbiddenError: (error) =>
+        _commandError({ command, errorCode: "FORBIDDEN", status: error.response.status }),
+      StreamGoneError: (error) =>
+        _commandError({ command, errorCode: "GONE", status: error.response.status }),
+      RateLimitedError: (error) =>
+        _commandError({ command, errorCode: "RATE_LIMITED", status: error.response.status }),
+      StreamUnavailableError: (error) =>
+        _commandError({ command, errorCode: "NETWORK_ERROR", status: error.response?.status }),
+      AppendOutcomeUnknownError: (error) =>
+        _commandError({ command, errorCode: "NETWORK_ERROR", status: error.response?.status }),
+      ProtocolViolationError: (error) =>
+        _commandError({ command, errorCode: "PARSE_ERROR", status: error.response?.status }),
       AdapterNotInitialized: () =>
         Effect.succeed({
           type: "error",
@@ -68,13 +162,160 @@ export const handleCommand = (command: AdapterCommand) =>
           message: "Invalid server URL",
         } satisfies TestResult),
     }),
+    Effect.provideServiceEffect(
+      HttpClient.HttpClient,
+      Effect.gen(function* () {
+        const state = yield* AdapterState;
+        const http = yield* HttpClient.HttpClient;
+        return http.pipe(HttpClient.mapRequestEffect(state.transform));
+      }),
+    ),
   );
 
-const _inspect = (command: Extract<AdapterCommand, { readonly path: string }>) =>
+const _commandError = (input: {
+  readonly command: AdapterCommand;
+  readonly errorCode: string;
+  readonly status?: number;
+}) =>
+  Effect.succeed({
+    type: "error",
+    success: false,
+    commandType: input.command.type,
+    errorCode: input.errorCode,
+    message: input.errorCode,
+    ...Record.filter({ status: input.status }, Predicate.isNotUndefined),
+  } satisfies TestResult);
+
+const _mutate = (
+  command: Extract<AdapterCommand, { readonly type: "create" | "append" | "close" | "delete" }>,
+) =>
   Effect.gen(function* () {
     const state = yield* AdapterState;
     const url = yield* state.location(command);
-    const client = yield* DurableStreamsClient.make({ url });
+    const headers = command.type !== "close" ? command.headers : undefined;
+    const contentType = yield* Match.value(command).pipe(
+      Match.discriminatorsExhaustive("type")({
+        create: (input) => Effect.succeed(input.contentType ?? "application/octet-stream"),
+        close: (input) =>
+          state.contentType(input).pipe(Effect.map((cached) => input.contentType ?? cached)),
+        append: (input) => state.contentType(input),
+        delete: (input) => state.contentType(input),
+      }),
+    );
+    const client = yield* DurableStreamsClient.make({
+      url,
+      ...Record.filter({ headers, contentType }, Predicate.isNotUndefined),
+      batching: false,
+    });
+    return yield* Match.value(command).pipe(
+      Match.discriminatorsExhaustive("type")({
+        create: (input) =>
+          Effect.gen(function* () {
+            if (input.ttlSeconds !== undefined && input.expiresAt !== undefined)
+              return yield* _commandError({ command, errorCode: "INVALID_ARGUMENT" });
+            const lifetime =
+              input.ttlSeconds !== undefined
+                ? yield* StreamLifetime.cases.Ttl.makeEffect({ ttlSeconds: input.ttlSeconds })
+                : input.expiresAt !== undefined
+                  ? yield* StreamLifetime.cases.ExpiresAt.makeEffect({ expiresAt: input.expiresAt })
+                  : undefined;
+            const parsed =
+              input.data === undefined
+                ? undefined
+                : _isJson(contentType)
+                  ? yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(input.data)
+                  : input.data;
+            const result = yield* client.create({
+              ...Record.filter({ lifetime, closed: input.closed }, Predicate.isNotUndefined),
+              ...(Array.isArray(parsed)
+                ? { values: parsed }
+                : Record.filter({ value: parsed }, Predicate.isNotUndefined)),
+            });
+            yield* state.remember({ path: input.path, contentType: result.contentType });
+            return {
+              type: "create",
+              success: true,
+              status: result.status,
+              offset: result.offset,
+            } satisfies TestResult;
+          }),
+        append: (input) =>
+          Effect.gen(function* () {
+            const metadata = contentType === undefined ? yield* client.connect : undefined;
+            const discovered =
+              metadata !== undefined && StreamMetadata.guards.Existing(metadata)
+                ? metadata.contentType
+                : contentType;
+            const json = _isJson(discovered);
+            const body = input.binary
+              ? yield* Schema.decodeEffect(Schema.Uint8ArrayFromBase64)(input.data)
+              : input.data;
+            const value = json
+              ? yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(
+                  Predicate.isString(body) ? body : new TextDecoder().decode(body),
+                )
+              : body;
+            const result = yield* client.append({
+              value,
+              ...Record.filter(
+                { seq: input.seq === undefined ? undefined : String(input.seq) },
+                Predicate.isNotUndefined,
+              ),
+            });
+            return {
+              type: "append",
+              success: true,
+              status: 200,
+              offset: result.offset,
+              ...(yield* state.sent),
+            } satisfies TestResult;
+          }),
+        close: (input) =>
+          Effect.gen(function* () {
+            const metadata =
+              contentType === undefined && input.data !== undefined
+                ? yield* client.connect
+                : undefined;
+            const discovered =
+              metadata !== undefined && StreamMetadata.guards.Existing(metadata)
+                ? metadata.contentType
+                : contentType;
+            const json = _isJson(discovered);
+            const value =
+              input.data === undefined
+                ? undefined
+                : json
+                  ? yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(input.data)
+                  : input.data;
+            const result = yield* client.close({
+              ...Record.filter({ value }, Predicate.isNotUndefined),
+            });
+            return {
+              type: "close",
+              success: true,
+              finalOffset: result.finalOffset,
+            } satisfies TestResult;
+          }),
+        delete: () =>
+          client.delete.pipe(
+            Effect.tap(() => state.forget(command)),
+            Effect.as({ type: "delete", success: true, status: 204 } satisfies TestResult),
+          ),
+      }),
+    );
+  });
+
+const _isJson = (contentType: string | undefined) =>
+  contentType?.split(";")[0]?.trim().toLowerCase() === "application/json";
+
+const _inspect = (command: Extract<AdapterCommand, { readonly type: "head" | "connect" }>) =>
+  Effect.gen(function* () {
+    const state = yield* AdapterState;
+    const url = yield* state.location(command);
+    const client = yield* DurableStreamsClient.make({
+      url,
+      ...Record.filter({ headers: command.headers }, Predicate.isNotUndefined),
+    });
     const metadata = yield* command.type === "head" ? client.head : client.connect;
     return Match.value(metadata).pipe(
       Match.tagsExhaustive({
@@ -181,7 +422,7 @@ const _processLine = (line: string) =>
           success: false,
           commandType,
           errorCode: "INVALID_ARGUMENT",
-          message: "Malformed or unsupported Phase 1 command",
+          message: "Malformed or unsupported Phase 2 command",
         })),
       ),
     ),

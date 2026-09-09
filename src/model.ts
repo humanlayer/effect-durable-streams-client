@@ -1,4 +1,4 @@
-import { DateTime, Option, Schema } from "effect";
+import { DateTime, Option, Schema, type Stream } from "effect";
 import { FieldValue } from "./headers.ts";
 
 export const Offset = Schema.NonEmptyString.check(Schema.isPattern(/^[^\s,&=?/]+$/));
@@ -90,6 +90,10 @@ export type CreateInput<A> = typeof CreateOptions.Type &
     | { readonly value?: never; readonly values?: never }
   );
 export type AppendInput<A> = { readonly value: A; readonly seq?: string };
+export type AppendStreamInput<E = never, R = never> = {
+  readonly source: Stream.Stream<Uint8Array | string, E, R>;
+  readonly seq?: string;
+};
 export type CloseInput<A> = { readonly value?: A; readonly seq?: string };
 
 export const AppendResult = Schema.Struct({ offset: Offset, closed: Schema.Boolean });

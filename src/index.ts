@@ -14,6 +14,7 @@ import {
   type DurableStreamsClientLayerConfig,
   type Offset,
   type AppendInput,
+  type AppendStreamInput,
   type CloseInput,
   type CreateInput,
   type AppendResult,
@@ -23,7 +24,8 @@ import {
 } from "./model.ts";
 import { inspectStream } from "./transport.ts";
 import { checkExtensions } from "./request.ts";
-import { appendStreamValue, closeStream, createStream, deleteStream } from "./lifecycle.ts";
+import { closeStream, createStream, deleteStream } from "./lifecycle.ts";
+import { appendSource, allocateOrdinaryAppends } from "./append.ts";
 
 export * from "./model.ts";
 export * from "./errors.ts";
@@ -40,6 +42,9 @@ export type Client<S extends Schema.Top, A = S["Type"]> = {
   readonly close: (
     input: CloseInput<A>,
   ) => Effect.Effect<CloseResult, CloseError, HttpClient.HttpClient | S["EncodingServices"]>;
+  readonly appendStream: <E, R>(
+    input: AppendStreamInput<E, R>,
+  ) => Effect.Effect<AppendResult, AppendError | E, HttpClient.HttpClient | R>;
   readonly delete: Effect.Effect<void, DeleteError, HttpClient.HttpClient>;
   readonly offset: Effect.Effect<Option.Option<Offset>>;
   readonly json: Stream.Stream<S["Type"], never, HttpClient.HttpClient | S["DecodingServices"]>;
@@ -92,6 +97,7 @@ function _make<S extends Schema.Top = typeof Schema.Json>(config: DurableStreams
     const json: Stream.Stream<S["Type"], never, HttpClient.HttpClient | S["DecodingServices"]> =
       Stream.die("Durable Streams JSON reads are not implemented until Phase 4");
     const currentConnection = yield* Ref.make(connection);
+    const append = yield* allocateOrdinaryAppends;
     return {
       create: (input: CreateInput<S["Type"] | Uint8Array>) =>
         Ref.get(currentConnection).pipe(
@@ -107,8 +113,12 @@ function _make<S extends Schema.Top = typeof Schema.Json>(config: DurableStreams
         ),
       append: (input: AppendInput<S["Type"] | Uint8Array>) =>
         Ref.get(currentConnection).pipe(
+          Effect.flatMap((connection) => append({ connection, schema: config.schema, input })),
+        ),
+      appendStream: <E, R>(input: AppendStreamInput<E, R>) =>
+        Ref.get(currentConnection).pipe(
           Effect.flatMap((connection) =>
-            appendStreamValue({ connection, schema: config.schema, input }),
+            appendSource({ connection, hasSchema: config.schema !== undefined, input }),
           ),
         ),
       close: (input: CloseInput<S["Type"] | Uint8Array>) =>

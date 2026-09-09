@@ -58,7 +58,7 @@ describe("Phase 2 conformance adapter", () => {
             features: {
               dynamicHeaders: true,
               retryOptions: false,
-              batching: false,
+              batching: true,
               sse: false,
               longPoll: false,
               streaming: false,

@@ -111,3 +111,23 @@ export const encodePayloads = <S extends Schema.Top>(
 
 export const encodePayload = <S extends Schema.Top>(input: EncodeInput<S>) =>
   encodePayloads({ ...input, values: [input.value] });
+
+export const combineAppendBodies = (input: {
+  readonly bodies: ReadonlyArray<Uint8Array>;
+  readonly contentType: string;
+}) => {
+  const json = input.contentType.split(";")[0]?.trim().toLowerCase() === "application/json";
+  const chunks = input.bodies.map((body) => (json ? body.subarray(1, body.length - 1) : body));
+  const bytes = new Uint8Array(
+    chunks.reduce((size, chunk) => size + chunk.length, 0) + (json ? chunks.length + 1 : 0),
+  );
+  let offset = 0;
+  if (json) bytes[offset++] = 91;
+  for (const [index, chunk] of chunks.entries()) {
+    if (json && index > 0) bytes[offset++] = 44;
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  if (json) bytes[offset] = 93;
+  return bytes;
+};

@@ -21,6 +21,7 @@ import {
   type MutationFailure,
 } from "./transport.ts";
 import { FieldValue } from "./headers.ts";
+import type { Stream } from "effect";
 
 const _commonRejection = (failure: MutationFailure) => {
   const response = failure.response;
@@ -181,18 +182,26 @@ export const deleteStream = (
 export type WriteRequest<S extends Schema.Top> = LifecycleContext<S> & {
   readonly input: CloseInput<S["Type"] | Uint8Array>;
   readonly operation: "append" | "close";
+  readonly prepared?: {
+    readonly body?: Uint8Array;
+    readonly bodyStream?: Stream.Stream<Uint8Array, unknown>;
+    readonly contentType: string;
+  };
 };
 
 const _write = <S extends Schema.Top>(request: WriteRequest<S>) =>
   Effect.gen(function* () {
     const { input, operation, connection } = request;
     const contentType =
+      request.prepared?.contentType ??
       connection.contentType ??
       (request.schema === undefined ? "application/octet-stream" : "application/json");
     const body =
-      operation === "close" && !Predicate.hasProperty(input, "value")
-        ? undefined
-        : yield* encodePayload({ ...request, value: input.value, contentType });
+      request.prepared !== undefined
+        ? request.prepared.body
+        : operation === "close" && !Predicate.hasProperty(input, "value")
+          ? undefined
+          : yield* encodePayload({ ...request, value: input.value, contentType });
     if (input.seq !== undefined) yield* Schema.decodeEffect(FieldValue)(input.seq);
     const response = yield* sendMutation({
       connection,
@@ -200,11 +209,15 @@ const _write = <S extends Schema.Top>(request: WriteRequest<S>) =>
       operation,
       safe: operation === "close" && !Predicate.hasProperty(input, "value"),
       headers: {
-        "content-type": body === undefined ? undefined : contentType,
+        "content-type":
+          body === undefined && request.prepared?.bodyStream === undefined
+            ? undefined
+            : contentType,
         "stream-seq": input.seq,
         "stream-closed": operation === "close" ? "true" : undefined,
       },
       ...Record.filter({ body }, Predicate.isNotUndefined),
+      ...Record.filter({ bodyStream: request.prepared?.bodyStream }, Predicate.isNotUndefined),
     });
     if (response.status !== 204)
       return yield* protocolViolation({
@@ -285,7 +298,10 @@ const _write = <S extends Schema.Top>(request: WriteRequest<S>) =>
   );
 
 export const appendStreamValue = <S extends Schema.Top>(
-  context: LifecycleContext<S> & { readonly input: AppendInput<S["Type"] | Uint8Array> },
+  context: LifecycleContext<S> & {
+    readonly input: AppendInput<S["Type"] | Uint8Array>;
+    readonly prepared?: WriteRequest<S>["prepared"];
+  },
 ): Effect.Effect<AppendResult, Errors.AppendError, HttpClient.HttpClient | S["EncodingServices"]> =>
   _write({ ...context, operation: "append" }).pipe(
     Effect.catchTag("StreamUnavailableError", (error) =>

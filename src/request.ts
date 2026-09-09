@@ -1,4 +1,4 @@
-import { Effect, Predicate, Record, Schema } from "effect";
+import { Effect, Predicate, Record, Schema, Stream } from "effect";
 import { HttpClientRequest } from "effect/unstable/http";
 import { InvalidDurableStreamsConfigError } from "./errors.ts";
 import type { DurableStreamsConnection } from "./model.ts";
@@ -38,6 +38,7 @@ export type RequestInput = {
   readonly method: "HEAD" | "PUT" | "POST" | "DELETE";
   readonly headers?: Readonly<Record<string, string | undefined>>;
   readonly body?: Uint8Array;
+  readonly bodyStream?: Stream.Stream<Uint8Array, unknown>;
 };
 
 export const buildRequest = (input: RequestInput) => {
@@ -52,6 +53,10 @@ export const buildRequest = (input: RequestInput) => {
   const request = HttpClientRequest.make(input.method)(url.href).pipe(
     HttpClientRequest.setHeaders(headers),
   );
+  if (input.bodyStream !== undefined)
+    return request.pipe(
+      HttpClientRequest.bodyStream(input.bodyStream, { contentType: headers["content-type"] }),
+    );
   return input.body === undefined
     ? request
     : request.pipe(HttpClientRequest.bodyUint8Array(input.body, headers["content-type"]));

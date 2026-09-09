@@ -41,6 +41,12 @@ export const AdapterCommand = Schema.Union([
     headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   }),
   Schema.Struct({
+    type: Schema.Literal("append-batch"),
+    path: Schema.String,
+    items: Schema.Array(Schema.String),
+    headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  }),
+  Schema.Struct({
     type: Schema.Literal("close"),
     path: Schema.String,
     data: Schema.optionalKey(Schema.String),
@@ -81,7 +87,7 @@ export const handleCommand = (command: AdapterCommand) =>
                 clientName: "effect-durable-streams-client",
                 clientVersion: "0.0.0",
                 features: {
-                  batching: false,
+                  batching: true,
                   sse: false,
                   longPoll: false,
                   auto: false,
@@ -99,6 +105,34 @@ export const handleCommand = (command: AdapterCommand) =>
       connect: (input) => _inspect(input),
       create: (input) => _mutate(input),
       append: (input) => _mutate(input),
+      "append-batch": (input) =>
+        Effect.gen(function* () {
+          const url = yield* state.location(input);
+          const contentType = yield* state.contentType(input);
+          const client = yield* DurableStreamsClient.make({
+            url,
+            ...Record.filter({ contentType, headers: input.headers }, Predicate.isNotUndefined),
+          });
+          const metadata = contentType === undefined ? yield* client.connect : undefined;
+          const discovered =
+            metadata !== undefined && StreamMetadata.guards.Existing(metadata)
+              ? metadata.contentType
+              : contentType;
+          const values = yield* Effect.forEach(input.items, (item) =>
+            _isJson(discovered)
+              ? Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(item)
+              : Effect.succeed(item),
+          );
+          const results = yield* Effect.forEach(values, (value) => client.append({ value }), {
+            concurrency: "unbounded",
+          });
+          return {
+            type: "append-batch" as const,
+            success: true as const,
+            status: 200,
+            offsets: results.map((result) => result.offset),
+          };
+        }),
       close: (input) => _mutate(input),
       delete: (input) => _mutate(input),
       "set-dynamic-header": (input) =>
@@ -152,7 +186,7 @@ export const handleCommand = (command: AdapterCommand) =>
           commandType: command.type,
           errorCode: "INVALID_ARGUMENT",
           message: "Initialize the adapter first",
-        } satisfies TestResult),
+        }),
       SchemaError: () =>
         Effect.succeed({
           type: "error",
@@ -160,7 +194,7 @@ export const handleCommand = (command: AdapterCommand) =>
           commandType: command.type,
           errorCode: "INVALID_ARGUMENT",
           message: "Invalid server URL",
-        } satisfies TestResult),
+        }),
     }),
     Effect.provideServiceEffect(
       HttpClient.HttpClient,
@@ -184,7 +218,7 @@ const _commandError = (input: {
     errorCode: input.errorCode,
     message: input.errorCode,
     ...Record.filter({ status: input.status }, Predicate.isNotUndefined),
-  } satisfies TestResult);
+  });
 
 const _mutate = (
   command: Extract<AdapterCommand, { readonly type: "create" | "append" | "close" | "delete" }>,
@@ -422,7 +456,7 @@ const _processLine = (line: string) =>
           success: false,
           commandType,
           errorCode: "INVALID_ARGUMENT",
-          message: "Malformed or unsupported Phase 2 command",
+          message: "Malformed or unsupported command",
         })),
       ),
     ),

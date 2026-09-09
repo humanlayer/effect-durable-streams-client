@@ -29,6 +29,7 @@ import { StreamMetadata, type DurableStreamsConnection } from "./model.ts";
 import { parseHeadMetadata } from "./protocol.ts";
 import { buildRequest, type RequestInput } from "./request.ts";
 import { parseRetryAfter, requestRetrySchedule } from "./retry.ts";
+import * as Errors from "./errors.ts";
 import { captureSchemaFailure } from "./encoding.ts";
 
 class HeadTransportFailure extends Data.TaggedError("HeadTransportFailure")<{
@@ -303,3 +304,101 @@ export const sendMutation = (input: MutationRequest) => {
     }),
   );
 };
+
+export const sendCatchupRequest = (input: {
+  readonly connection: DurableStreamsConnection;
+  readonly position: { readonly offset: string; readonly cursor?: string };
+}) =>
+  Effect.gen(function* () {
+    const scope = yield* Scope.fork(yield* Effect.scope);
+    return yield* Effect.gen(function* () {
+      const http = yield* HttpClient.HttpClient;
+      const response = yield* HttpClient.withScope(http)
+        .execute(
+          buildRequest({
+            connection: input.connection,
+            method: "GET",
+            readPosition: input.position,
+          }),
+        )
+        .pipe(
+          Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
+          Effect.catchReason("HttpClientError", "StatusCodeError", (reason) =>
+            Effect.succeed(reason.response),
+          ),
+          Effect.mapError((cause) => new ReadRequestFailure({ cause })),
+        );
+      if (response.status === 200) return response;
+      const snapshot = yield* _snapshotResponse({
+        response,
+        url: input.connection.url.origin + input.connection.url.pathname,
+        operation: "read",
+      });
+      const retryAfter = yield* parseRetryAfter(response.headers["retry-after"]);
+      return yield* new ReadRequestFailure({
+        response: snapshot,
+        ...Record.filter(
+          { retryAfter: Option.getOrUndefined(retryAfter) },
+          Predicate.isNotUndefined,
+        ),
+      });
+    }).pipe(
+      Effect.provideService(Scope.Scope, scope),
+      Effect.onExit((exit) => (Exit.isFailure(exit) ? Scope.close(scope, exit) : Effect.void)),
+    );
+  }).pipe(
+    Effect.tapError((failure) =>
+      Effect.logWarning("Stream read request failed", {
+        operation: "read",
+        url: input.connection.url.origin + input.connection.url.pathname,
+        status: failure.response?.status,
+        transport: failure.cause?.reason._tag,
+      }),
+    ),
+    Effect.retry({
+      while: (failure) =>
+        failure.response === undefined ||
+        failure.response.status === 429 ||
+        failure.response.status >= 500 ||
+        (failure.response.status >= 300 &&
+          failure.response.status < 400 &&
+          failure.response.status !== 304),
+      schedule: requestRetrySchedule(input.connection),
+    }),
+    Effect.catchTag("ReadRequestFailure", (failure: ReadRequestFailure) => {
+      const response = failure.response;
+      if (response === undefined) return Effect.fail(new Errors.StreamUnavailableError({}));
+      return Match.value(response.status).pipe(
+        Match.when(400, () => Effect.fail(new Errors.InvalidRequestError({ response }))),
+        Match.when(401, () => Effect.fail(new Errors.UnauthorizedError({ response }))),
+        Match.when(403, () => Effect.fail(new Errors.ForbiddenError({ response }))),
+        Match.when(404, () => Effect.fail(new Errors.StreamNotFoundError({ response }))),
+        Match.when(410, () => Effect.fail(new Errors.StreamGoneError({ response }))),
+        Match.when(429, () =>
+          Effect.fail(
+            new Errors.RateLimitedError({
+              response,
+              ...Record.filter({ retryAfter: failure.retryAfter }, Predicate.isNotUndefined),
+            }),
+          ),
+        ),
+        Match.when(
+          (status) =>
+            status >= 500 || status === 408 || (status >= 300 && status !== 304 && status < 400),
+          () => Effect.fail(new Errors.StreamUnavailableError({ response })),
+        ),
+        Match.orElse(() =>
+          Effect.fail(new Errors.ProtocolViolationError({ component: "read status", response })),
+        ),
+      );
+    }),
+    Effect.withSpan("durable_streams.read.catchup", {
+      attributes: { url: input.connection.url.origin + input.connection.url.pathname },
+    }),
+  );
+
+class ReadRequestFailure extends Data.TaggedError("ReadRequestFailure")<{
+  readonly response?: ErrorResponse;
+  readonly cause?: HttpClientError.HttpClientError;
+  readonly retryAfter?: Duration.Duration;
+}> {}

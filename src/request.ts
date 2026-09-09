@@ -36,7 +36,8 @@ export const checkExtensions = (connection: DurableStreamsConnection) =>
 
 export type RequestInput = {
   readonly connection: DurableStreamsConnection;
-  readonly method: "HEAD" | "PUT" | "POST" | "DELETE";
+  readonly method: "HEAD" | "GET" | "PUT" | "POST" | "DELETE";
+  readonly readPosition?: { readonly offset: string; readonly cursor?: string };
   readonly headers?: Readonly<Record<string, string | undefined>>;
   readonly body?: Uint8Array;
   readonly bodyStream?: Stream.Stream<Uint8Array, unknown>;
@@ -46,6 +47,11 @@ export const buildRequest = (input: RequestInput) => {
   const url = new URL(input.connection.url.href);
   for (const [key, value] of Object.entries(input.connection.params ?? {}))
     url.searchParams.set(key, value);
+  if (input.readPosition !== undefined) {
+    url.searchParams.set("offset", input.readPosition.offset);
+    if (input.readPosition.cursor !== undefined)
+      url.searchParams.set("cursor", input.readPosition.cursor);
+  }
   url.searchParams.sort();
   const headers = {
     ...input.connection.headers,

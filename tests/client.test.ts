@@ -1,11 +1,12 @@
 import { describe, expect, expectTypeOf, it } from "@effect/vitest";
-import { Cause, Context, Effect, Exit, Layer, Option, Schema, SchemaGetter, Stream } from "effect";
+import { Context, Effect, Layer, Option, Schema, SchemaGetter, Stream } from "effect";
 import type { HttpClient } from "effect/unstable/http";
 import {
   DurableStreamsClient,
   type DurableStreamsClientLayerConfig,
   StreamMetadata,
   type HeadError,
+  type ReadError,
   type InvalidDurableStreamsConfigError,
 } from "../src/index.ts";
 import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.ts";
@@ -23,7 +24,7 @@ describe("construction and API types", () => {
         schema: Event,
       });
       const client = yield* make;
-      const json: Stream.Stream<typeof Event.Type, never, HttpClient.HttpClient> = client.json;
+      const json: Stream.Stream<typeof Event.Type, ReadError, HttpClient.HttpClient> = client.json;
       const head: Effect.Effect<
         Effect.Success<typeof client.head>,
         HeadError,
@@ -65,7 +66,7 @@ describe("construction and API types", () => {
         expectTypeOf<Effect.Services<typeof construction>>().toEqualTypeOf<never>();
         expectTypeOf<typeof codec.EncodingServices>().toEqualTypeOf<EncodeService>();
         expectTypeOf<Stream.Success<typeof client.json>>().toEqualTypeOf<string>();
-        const json: Stream.Stream<string, never, DecodeService | HttpClient.HttpClient> =
+        const json: Stream.Stream<string, ReadError, DecodeService | HttpClient.HttpClient> =
           client.json;
         expect(json).toBe(client.json);
         expectTypeOf<Stream.Services<typeof client.json>>().toEqualTypeOf<
@@ -74,7 +75,7 @@ describe("construction and API types", () => {
       }),
   );
 
-  it.effect("keeps the raw JSON default and does not fake a later-phase read", () =>
+  it.effect("keeps the raw JSON default and consumes real payloads", () =>
     Effect.gen(function* () {
       const http = yield* makeScriptedHttpClient;
       const client = yield* DurableStreamsClient.make({
@@ -82,14 +83,19 @@ describe("construction and API types", () => {
         contentType: "application/json",
       });
       expectTypeOf<Stream.Success<typeof client.json>>().toEqualTypeOf<Schema.Json>();
-      const exit = yield* client.json.pipe(
-        Stream.runDrain,
-        Effect.exit,
-        Effect.provide(http.layer),
+      yield* http.respond(
+        ScriptedResponse.Response({
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "stream-next-offset": "end",
+            "stream-up-to-date": "true",
+          },
+          body: "[1]",
+        }),
       );
-      expect(Exit.hasDies(exit)).toBe(true);
-      if (Exit.isFailure(exit))
-        expect(Cause.pretty(exit.cause)).toContain("not implemented until Phase 4");
+      const result = yield* client.json.pipe(Stream.runCollect, Effect.provide(http.layer));
+      expect(result).toEqual([1]);
     }),
   );
 
@@ -136,7 +142,18 @@ describe("construction and API types", () => {
       expectTypeOf<Effect.Services<typeof clientProvided>>().toEqualTypeOf<HttpClient.HttpClient>();
       const provided = clientProvided.pipe(Effect.provide(http.layer));
       expectTypeOf<Effect.Services<typeof provided>>().toEqualTypeOf<never>();
-      expect(Exit.hasDies(yield* Effect.exit(provided))).toBe(true);
+      yield* http.respond(
+        ScriptedResponse.Response({
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "stream-next-offset": "end",
+            "stream-up-to-date": "true",
+          },
+          body: '["123"]',
+        }),
+      );
+      expect(yield* provided).toEqual(["123"]);
     }),
   );
 
@@ -195,7 +212,7 @@ describe("construction and API types", () => {
         {
           readonly events: Stream.Stream<
             typeof Order.Type,
-            never,
+            ReadError,
             DecodeOrder | HttpClient.HttpClient
           >;
         }
@@ -223,7 +240,18 @@ describe("construction and API types", () => {
         ),
       );
       expectTypeOf<Effect.Services<typeof provided>>().toEqualTypeOf<never>();
-      expect(Exit.hasDies(yield* Effect.exit(provided))).toBe(true);
+      yield* http.respond(
+        ScriptedResponse.Response({
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "stream-next-offset": "end",
+            "stream-up-to-date": "true",
+          },
+          body: '["123"]',
+        }),
+      );
+      expect(yield* provided).toEqual([{ orderId: "order-123" }]);
     }),
   );
 

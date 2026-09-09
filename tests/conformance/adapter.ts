@@ -1,6 +1,21 @@
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { Data, Effect, Layer, Logger, Match, Predicate, Record, Schema, Stream } from "effect";
+import {
+  Array as Arr,
+  Data,
+  Deferred,
+  Duration,
+  Effect,
+  Layer,
+  Logger,
+  Match,
+  Option,
+  Predicate,
+  Record,
+  Ref,
+  Schema,
+  Stream,
+} from "effect";
 import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import type { TestResult } from "@durable-streams/client-conformance-tests/protocol";
 import { DurableStreamsClient, StreamLifetime, StreamMetadata } from "../../src/index.ts";
@@ -10,8 +25,20 @@ export class AdapterInputError extends Data.TaggedError("AdapterInputError")<{
   readonly cause: unknown;
 }> {}
 
+class AdapterReadTimeout extends Data.TaggedError("AdapterReadTimeout") {}
+
 export const AdapterCommand = Schema.Union([
   Schema.Struct({ type: Schema.Literal("init"), serverUrl: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literal("read"),
+    path: Schema.String,
+    offset: Schema.optionalKey(Schema.String),
+    live: Schema.optionalKey(Schema.Union([Schema.Boolean, Schema.Literals(["long-poll", "sse"])])),
+    timeoutMs: Schema.optionalKey(Schema.Finite),
+    maxChunks: Schema.optionalKey(Schema.Int),
+    waitForUpToDate: Schema.optionalKey(Schema.Boolean),
+    headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  }),
   Schema.Struct({
     type: Schema.Literal("head"),
     path: Schema.String,
@@ -103,6 +130,105 @@ export const handleCommand = (command: AdapterCommand) =>
       shutdown: () => Effect.succeed({ type: "shutdown", success: true } satisfies TestResult),
       head: (input) => _inspect(input),
       connect: (input) => _inspect(input),
+      read: (input) =>
+        Effect.gen(function* () {
+          if (input.live !== undefined && input.live !== false)
+            return yield* _commandError({ command, errorCode: "NOT_SUPPORTED" });
+          const acquired = yield* Deferred.make<void>();
+          const streamClosed = yield* Ref.make(false);
+          const deadline = Deferred.await(acquired).pipe(
+            Effect.timeoutOrElse({
+              duration: Duration.millis(input.timeoutMs ?? 5000),
+              orElse: () => Effect.fail(new AdapterReadTimeout()),
+            }),
+            Effect.andThen(Effect.never),
+          );
+          return yield* Effect.gen(function* () {
+            const url = yield* state.location(input);
+            const contentType = yield* state.contentType(input);
+            const client = yield* DurableStreamsClient.make({
+              url,
+              ...Record.filter(
+                { offset: input.offset, headers: input.headers },
+                Predicate.isNotUndefined,
+              ),
+            });
+            const metadata = contentType === undefined ? yield* client.connect : undefined;
+            const discovered =
+              metadata !== undefined && StreamMetadata.guards.Existing(metadata)
+                ? metadata.contentType
+                : contentType;
+            const data = _isJson(discovered)
+              ? yield* client.json.pipe(
+                  Stream.runCollect,
+                  Effect.flatMap((items) =>
+                    !Arr.isArrayNonEmpty(items)
+                      ? Effect.succeed("")
+                      : Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.Json)))(
+                          items,
+                        ),
+                  ),
+                )
+              : yield* client.bytes.pipe(
+                  Stream.runCollect,
+                  Effect.map((chunks) => {
+                    const bytes = new Uint8Array(
+                      chunks.reduce((size, chunk) => size + chunk.length, 0),
+                    );
+                    const position = { offset: 0 };
+                    for (const chunk of chunks) {
+                      bytes.set(chunk, position.offset);
+                      position.offset += chunk.length;
+                    }
+                    return new TextDecoder().decode(bytes);
+                  }),
+                );
+            const offset = Option.getOrUndefined(yield* client.offset);
+            const position = Record.filter({ offset }, Predicate.isNotUndefined);
+            return {
+              type: "read",
+              success: true,
+              status: 200,
+              chunks: data.length === 0 ? [] : [{ data, ...position }],
+              ...position,
+              upToDate: true,
+              streamClosed: yield* Ref.get(streamClosed),
+              ...(yield* state.sent),
+            } satisfies TestResult;
+          }).pipe(
+            Effect.provideServiceEffect(
+              HttpClient.HttpClient,
+              Effect.map(HttpClient.HttpClient, (http) =>
+                http.pipe(
+                  HttpClient.tap((response) =>
+                    response.request.method === "GET" && response.status === 200
+                      ? Ref.set(streamClosed, response.headers["stream-closed"] === "true").pipe(
+                          Effect.andThen(Deferred.succeed(acquired, undefined)),
+                        )
+                      : Effect.void,
+                  ),
+                ),
+              ),
+            ),
+            Effect.raceFirst(deadline),
+            Effect.catchTag("AdapterReadTimeout", () =>
+              state.sent.pipe(
+                Effect.map(
+                  (sent) =>
+                    ({
+                      type: "read",
+                      success: true,
+                      status: 200,
+                      chunks: [],
+                      offset: input.offset ?? "-1",
+                      upToDate: true,
+                      ...sent,
+                    }) satisfies TestResult,
+                ),
+              ),
+            ),
+          );
+        }),
       create: (input) => _mutate(input),
       append: (input) => _mutate(input),
       "append-batch": (input) =>
@@ -151,6 +277,8 @@ export const handleCommand = (command: AdapterCommand) =>
       InvalidDurableStreamsConfigError: () =>
         _commandError({ command, errorCode: "INVALID_ARGUMENT" }),
       PayloadEncodeError: () => _commandError({ command, errorCode: "INVALID_ARGUMENT" }),
+      PayloadDecodeError: () => _commandError({ command, errorCode: "PARSE_ERROR" }),
+      AlreadyConsumedError: () => _commandError({ command, errorCode: "ALREADY_CONSUMED" }),
       CreateConflictError: (error) =>
         _commandError({ command, errorCode: "CONFLICT", status: error.response.status }),
       AppendConflictError: (error) =>

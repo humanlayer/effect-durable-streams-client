@@ -1,5 +1,5 @@
-import { Effect, Match, Predicate, Schema, type SchemaIssue } from "effect";
-import { PayloadEncodeError } from "./errors.ts";
+import { Data, Effect, Match, Predicate, Schema, Stream, type SchemaIssue } from "effect";
+import { PayloadDecodeError, PayloadEncodeError } from "./errors.ts";
 
 export type EncodeInput<S extends Schema.Top> = {
   readonly schema?: S;
@@ -131,3 +131,82 @@ export const combineAppendBodies = (input: {
   if (json) bytes[offset] = 93;
   return bytes;
 };
+
+class Utf8Failure extends Data.TaggedError("Utf8Failure")<{
+  readonly cause: unknown;
+}> {}
+
+export const allocateTextDecoder = () => {
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const state = { pending: 0 };
+  const decode = (bytes: Uint8Array | undefined) =>
+    Effect.try({
+      try: () => {
+        const text = decoder.decode(bytes, { stream: bytes !== undefined });
+        for (const byte of bytes ?? []) {
+          if (state.pending > 0) state.pending--;
+          else if (byte >= 0xf0) state.pending = 3;
+          else if (byte >= 0xe0) state.pending = 2;
+          else if (byte >= 0xc2) state.pending = 1;
+        }
+        return text;
+      },
+      catch: (cause) => new Utf8Failure({ cause }),
+    }).pipe(
+      Effect.tapError(() =>
+        Effect.logWarning("Stream UTF-8 boundary failed", { operation: "read" }),
+      ),
+      Effect.catchTag("Utf8Failure", () =>
+        Effect.fail(new PayloadDecodeError({ component: "UTF-8" })),
+      ),
+    );
+  return {
+    complete: Effect.sync(() => state.pending === 0),
+    decode: <E, R>(input: {
+      readonly source: Stream.Stream<Uint8Array, E, R>;
+      readonly final: boolean;
+    }) =>
+      input.source.pipe(
+        Stream.mapEffect(decode),
+        Stream.concat(input.final ? Stream.fromEffect(decode(undefined)) : Stream.empty),
+        Stream.filter((text) => text.length > 0),
+      ),
+  };
+};
+
+export const decodeText = <E, R>(source: Stream.Stream<Uint8Array, E, R>) =>
+  Stream.suspend(() => allocateTextDecoder().decode({ source, final: true }));
+
+const _decodeReadSchema = <S extends Schema.Top>(input: {
+  readonly schema: S;
+  readonly value: Schema.Json;
+}) =>
+  Schema.decodeEffect(input.schema)(input.value).pipe(
+    Effect.tapError((cause) =>
+      captureSchemaFailure({ cause, operation: "read", component: "JSON payload" }),
+    ),
+    Effect.catchTag("SchemaError", () =>
+      Effect.fail(new PayloadDecodeError({ component: "JSON payload" })),
+    ),
+  );
+
+export const decodeJson = <S extends Schema.Top, E, R>(input: {
+  readonly source: Stream.Stream<Uint8Array, E, R>;
+  readonly schema: S;
+}) =>
+  Stream.unwrap(
+    decodeText(input.source).pipe(
+      Stream.runFold(
+        () => "",
+        (text, chunk) => text + chunk,
+      ),
+      Effect.flatMap((value) =>
+        _decodeReadSchema({ schema: Schema.fromJsonString(Schema.Array(Schema.Json)), value }),
+      ),
+      Effect.map((items) =>
+        Stream.fromIterable(items).pipe(
+          Stream.mapEffect((value) => _decodeReadSchema({ schema: input.schema, value })),
+        ),
+      ),
+    ),
+  );

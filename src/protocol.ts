@@ -20,6 +20,15 @@ export const WriteHeaders = Schema.Struct({
   "stream-closed": Schema.optionalKey(Schema.Literals(["true", "false"])),
 });
 
+export const ReadHeaders = Schema.Struct({
+  ...WriteHeaders.fields,
+  "content-type": ContentType,
+  "stream-up-to-date": Schema.optionalKey(Schema.Literal("true")),
+  "stream-cursor": Schema.optionalKey(Schema.NonEmptyString),
+  etag: Schema.optionalKey(Schema.String),
+  "cache-control": Schema.optionalKey(Schema.String),
+});
+
 export class HeadMetadataFailure extends Data.TaggedError("HeadMetadataFailure")<{
   readonly component: string;
   readonly cause: Schema.SchemaError | SchemaIssue.Issue;

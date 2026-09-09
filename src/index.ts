@@ -7,6 +7,7 @@ import {
   type CreateError,
   type DeleteError,
   type HeadError,
+  type ReadError,
 } from "./errors.ts";
 import {
   DurableStreamsConnection,
@@ -25,6 +26,7 @@ import {
 import { inspectStream } from "./transport.ts";
 import { checkExtensions } from "./request.ts";
 import { closeStream, createStream, deleteStream } from "./lifecycle.ts";
+import { allocateRead } from "./read.ts";
 import { appendSource, allocateOrdinaryAppends } from "./append.ts";
 
 export * from "./model.ts";
@@ -47,7 +49,9 @@ export type Client<S extends Schema.Top, A = S["Type"]> = {
   ) => Effect.Effect<AppendResult, AppendError | E, HttpClient.HttpClient | R>;
   readonly delete: Effect.Effect<void, DeleteError, HttpClient.HttpClient>;
   readonly offset: Effect.Effect<Option.Option<Offset>>;
-  readonly json: Stream.Stream<S["Type"], never, HttpClient.HttpClient | S["DecodingServices"]>;
+  readonly bytes: Stream.Stream<Uint8Array, ReadError, HttpClient.HttpClient>;
+  readonly text: Stream.Stream<string, ReadError, HttpClient.HttpClient>;
+  readonly json: Stream.Stream<S["Type"], ReadError, HttpClient.HttpClient | S["DecodingServices"]>;
 };
 
 function _make(
@@ -93,9 +97,11 @@ function _make<S extends Schema.Top = typeof Schema.Json>(config: DurableStreams
         issues: ["Custom schemas require application/json"],
       });
     }
-    const offset = yield* Ref.make<Option.Option<Offset>>(Option.none());
-    const json: Stream.Stream<S["Type"], never, HttpClient.HttpClient | S["DecodingServices"]> =
-      Stream.die("Durable Streams JSON reads are not implemented until Phase 4");
+    const read = yield* allocateRead({
+      connection,
+      schema: config.schema ?? Schema.Json,
+      hasSchema: config.schema !== undefined,
+    });
     const currentConnection = yield* Ref.make(connection);
     const append = yield* allocateOrdinaryAppends;
     return {
@@ -145,8 +151,7 @@ function _make<S extends Schema.Top = typeof Schema.Json>(config: DurableStreams
           ),
         ),
       ),
-      offset: Ref.get(offset).pipe(Effect.withSpan("durable_streams.offset")),
-      json,
+      ...read,
     };
   }).pipe(Effect.withSpan("durable_streams.make"));
 }

@@ -206,3 +206,33 @@ export type AppendError =
   | PayloadEncodeError
   | ProtocolViolationError;
 export type CloseError = AppendError | StreamUnavailableError;
+
+export class AlreadyConsumedError extends Schema.TaggedError<AlreadyConsumedError>()(
+  "AlreadyConsumedError",
+  {},
+) {
+  override get message() {
+    return "Stream read session has already been consumed";
+  }
+}
+
+export class PayloadDecodeError extends Schema.TaggedError<PayloadDecodeError>()(
+  "PayloadDecodeError",
+  { component: Schema.String },
+) {
+  override get message() {
+    return "Unable to decode stream payload";
+  }
+}
+
+export type ReadError =
+  | AlreadyConsumedError
+  | UnauthorizedError
+  | ForbiddenError
+  | StreamNotFoundError
+  | StreamGoneError
+  | InvalidRequestError
+  | RateLimitedError
+  | StreamUnavailableError
+  | PayloadDecodeError
+  | ProtocolViolationError;

@@ -27,6 +27,8 @@
     "build": "vp pack",
     "dev": "vp pack --watch",
     "test": "vp test",
+    "test:integration": "vp test tests/integration",
+    "test:conformance": "vp exec client-conformance-tests --run ./tests/conformance/run-adapter.sh",
     "check": "vp check && bun run typed",
     "typed": "node --import tsx tools/typed-lint/src/cli.ts check --config typed-lint.config.json",
     "diff:check": "node --import tsx tools/diff-check/src/main.ts --config tools/diff-check/diff-check.config.json",
@@ -34,11 +36,13 @@
     "prepare": "effect-tsgo patch --oxlint"
   },
   "dependencies": {
-    "effect": "^4.0.0-beta.107"
+    "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
+    "@durable-streams/client-conformance-tests": "0.2.12",
+    "@durable-streams/server": "0.3.8",
     "@effect/tsgo": "^0.38.0",
-    "@effect/vitest": "^4.0.0-beta.107",
+    "@effect/vitest": "4.0.0-rc.112",
     "@oxlint/plugins": "^1.80.0",
     "@types/node": "^26.1.1",
     "bumpp": "^11.1.0",

@@ -35,7 +35,6 @@ jobs:
         with:
           version: 0.3.0
           run-install: false
-          node-manager: false
       - name: Derive release version and dist-tag from Git tag
         id: release
         run: bash scripts/release-tag-info.sh

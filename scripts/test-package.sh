@@ -217,15 +217,20 @@ STREAM_URL="$1" RUNTIME_ID=bun bun runtime.mjs
 cat > browser.mjs <<'JS'
 import { DurableStream } from '@humanlayer/effect-durable-streams-client/async-await';
 globalThis.facadeSmoke = async () => {
-  const response = await new DurableStream({url: 'https://example.test/browser', fetch: async () => new Response('[1,2]', {headers: {'content-type': 'application/json', 'stream-next-offset': 'tail', 'stream-up-to-date': 'true'}})}).stream();
+  let fetchCalled = false;
+  const response = await new DurableStream({url: 'https://example.test/browser', fetch: async () => {
+    fetchCalled = true;
+    return new Response('[1,2]', {headers: {'content-type': 'application/json', 'stream-next-offset': 'tail', 'stream-up-to-date': 'true'}});
+  }}).stream();
   const reader = response.jsonStream().getReader();
   if ((await reader.read()).value !== 1) throw new Error('Unexpected browser payload');
   await reader.cancel();
   await response.closed;
+  if (!fetchCalled) throw new Error('Injected Fetch was not called');
   if (response.offset !== '-1') throw new Error('Unsafe browser checkpoint');
   document.body.textContent = 'BROWSER_PASS';
 };
-globalThis.facadeSmoke().catch(() => { document.body.textContent = 'BROWSER_FAIL'; });
+globalThis.facadeSmoke().catch((error) => { document.body.textContent = `BROWSER_FAIL: ${error?.stack ?? error}`; });
 JS
 bun build browser.mjs --target=browser --outfile=browser.js
 printf '<!doctype html><body><script src="browser.js"></script></body>' > browser.html
@@ -234,17 +239,66 @@ if [[ -x "$chrome" ]]; then
   CHROME_EXEC="$chrome" CHROME_PROFILE="$temp/chrome" node --input-type=module <<'JS'
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-const child = spawn(process.env.CHROME_EXEC, ['--headless', '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--disable-component-update', '--no-sandbox', '--disable-gpu', `--user-data-dir=${process.env.CHROME_PROFILE}`, '--allow-file-access-from-files', '--virtual-time-budget=5000', '--dump-dom', `file://${process.cwd()}/browser.html`], {detached: true, stdio: ['ignore', 'pipe', 'pipe']});
-let output = '';
+const child = spawn(process.env.CHROME_EXEC, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--disable-component-update', '--disable-dev-shm-usage', '--no-sandbox', '--disable-gpu', '--remote-debugging-port=0', '--remote-allow-origins=*', `--user-data-dir=${process.env.CHROME_PROFILE}`, '--allow-file-access-from-files', 'about:blank'], {detached: true, stdio: ['ignore', 'ignore', 'pipe']});
 let diagnostics = '';
 const stop = () => { try { process.kill(-child.pid, 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') throw error; } };
+const endpoint = new Promise((resolve, reject) => {
+  child.once('error', reject);
+  child.once('close', (code) => reject(new Error(`Chrome exited before CDP was ready (${code})\n${diagnostics}`)));
+  child.stderr.on('data', (chunk) => {
+    diagnostics += chunk;
+    const match = diagnostics.match(/DevTools listening on (ws:\/\/[^\s]+)/);
+    if (match) resolve(match[1]);
+  });
+});
+const deadline = Date.now() + 15000;
 const timeout = setTimeout(stop, 15000);
-child.stdout.on('data', (chunk) => { output += chunk; if (output.includes('</html>')) stop(); });
-child.stderr.on('data', (chunk) => { diagnostics += chunk; });
-await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
-clearTimeout(timeout);
-assert.ok(output.includes('BROWSER_PASS'), `${output}\n${diagnostics}`);
-console.log('Browser Fetch/Web cancellation passed');
+try {
+  const webSocket = new WebSocket(await endpoint);
+  await new Promise((resolve, reject) => {
+    webSocket.addEventListener('open', resolve, {once: true});
+    webSocket.addEventListener('error', () => reject(new Error(`Could not connect to Chrome CDP\n${diagnostics}`)), {once: true});
+    webSocket.addEventListener('close', () => reject(new Error(`Chrome CDP closed before connecting\n${diagnostics}`)), {once: true});
+  });
+  let nextId = 0;
+  const pending = new Map();
+  webSocket.addEventListener('message', ({data}) => {
+    const message = JSON.parse(data);
+    if (message.id === undefined) return;
+    const waiter = pending.get(message.id);
+    if (!waiter) return;
+    pending.delete(message.id);
+    if (message.error) waiter.reject(new Error(JSON.stringify(message.error)));
+    else waiter.resolve(message.result);
+  });
+  webSocket.addEventListener('close', () => {
+    for (const waiter of pending.values()) waiter.reject(new Error(`Chrome CDP closed before the browser smoke completed\n${diagnostics}`));
+    pending.clear();
+  }, {once: true});
+  const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
+    const id = ++nextId;
+    pending.set(id, {resolve, reject});
+    webSocket.send(JSON.stringify({id, method, params, ...(sessionId ? {sessionId} : {})}));
+  });
+  const {targetId} = await send('Target.createTarget', {url: `file://${process.cwd()}/browser.html`});
+  const {sessionId} = await send('Target.attachToTarget', {targetId, flatten: true});
+  await send('Runtime.enable', {}, sessionId);
+  let body = '';
+  while (Date.now() < deadline) {
+    const evaluation = await send('Runtime.evaluate', {expression: 'document.body.textContent', returnByValue: true}, sessionId);
+    body = evaluation.result.value ?? '';
+    if (body.includes('BROWSER_PASS')) break;
+    if (body.includes('BROWSER_FAIL')) throw new Error(`${body}\n${diagnostics}`);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.ok(body.includes('BROWSER_PASS'), `${body}\n${diagnostics}`);
+  await send('Browser.close').catch(() => {});
+  webSocket.close();
+  console.log('Browser injected Fetch/Web cancellation passed');
+} finally {
+  clearTimeout(timeout);
+  stop();
+}
 JS
 else
   echo 'Browser execution unavailable; browser bundle only' >&2

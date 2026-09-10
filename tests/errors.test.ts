@@ -11,8 +11,8 @@ import {
   type AppendResult,
   type CreateResult,
   type CloseResult,
-} from "../src/index.ts";
-import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.ts";
+} from "../src/index.js";
+import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.js";
 
 describe("mutation error contracts", () => {
   it.effect("classifies ordinary failures when retries are explicitly disabled", () =>

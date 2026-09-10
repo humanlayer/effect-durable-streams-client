@@ -1,11 +1,38 @@
-import { Clock, Effect, Option, Predicate, Record, Ref, Schema, Stream, Schedule } from "effect";
-import * as Errors from "./errors.ts";
-import { captureSchemaFailure, decodeJson, allocateTextDecoder } from "./encoding.ts";
-import type { DurableStreamsConnection, Offset } from "./model.ts";
-import { LongPollEmptyHeaders, LongPollHeaders, ReadHeaders } from "./protocol.ts";
-import { freezeErrorResponse, protocolViolation, sendReadRequest } from "./transport.ts";
-import { decodeSseData, parseSse, SseEvent } from "./sse.ts";
-import { waitForSseReconnect } from "./retry.ts";
+import {
+  Clock,
+  Effect,
+  Exit,
+  Option,
+  Predicate,
+  Record,
+  Ref,
+  Schema,
+  Scope,
+  Stream,
+  Schedule,
+} from "effect";
+import * as Errors from "./errors.js";
+import { captureSchemaFailure, decodeJson, allocateTextDecoder } from "./encoding.js";
+import type { DurableStreamsConnection, Offset } from "./model.js";
+import { LongPollEmptyHeaders, LongPollHeaders, ReadHeaders } from "./protocol.js";
+import { freezeErrorResponse, protocolViolation, sendReadRequest } from "./transport.js";
+import { decodeSseData, parseSse, SseEvent } from "./sse.js";
+import { waitForSseReconnect } from "./retry.js";
+import type { HttpClientResponse } from "effect/unstable/http";
+
+export type ReadBoundary = {
+  readonly offset: string;
+  readonly cursor: string | undefined;
+  readonly upToDate: boolean;
+  readonly streamClosed: boolean;
+};
+export type ReadBatch = ReadBoundary & {
+  readonly chunks: ReadonlyArray<Uint8Array>;
+  readonly sse: boolean;
+  readonly bodyless: boolean;
+  readonly partial?: boolean;
+};
+type ReadTransport = { response: HttpClientResponse.HttpClientResponse | undefined };
 
 export const allocateRead = <S extends Schema.Top>(input: {
   readonly connection: DurableStreamsConnection;
@@ -15,13 +42,47 @@ export const allocateRead = <S extends Schema.Top>(input: {
   Effect.gen(function* () {
     const consumed = yield* Ref.make(false);
     const offset = yield* Ref.make<Option.Option<Offset>>(Option.none());
+    const transport: ReadTransport = {
+      response: undefined,
+    };
+    const initial: ReadTransport = {
+      response: undefined,
+    };
+    const initialScope = yield* Ref.make<Scope.Closeable | undefined>(undefined);
+    const acquireInitial = Effect.gen(function* () {
+      const scope = yield* Scope.fork(yield* Effect.scope);
+      yield* Ref.set(initialScope, scope);
+      const response = yield* sendReadRequest({
+        connection: input.connection,
+        position: { offset: input.connection.offset ?? "-1" },
+        longPoll: false,
+      }).pipe(Effect.provideService(Scope.Scope, scope));
+      yield* Schema.decodeUnknownEffect(ReadHeaders)(response.headers).pipe(
+        Effect.catchTag("SchemaError", () =>
+          protocolViolation({ response, component: "read headers" }),
+        ),
+      );
+      if (
+        input.hasSchema &&
+        response.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "application/json"
+      )
+        return yield* protocolViolation({ response, component: "read content-type" });
+      initial.response = response;
+      transport.response = response;
+      return response;
+    });
     const view = <A, R>(options: {
       readonly decode: (input: {
         readonly source: Stream.Stream<Uint8Array, Errors.ReadError>;
         readonly final: boolean;
+        readonly boundary: ReadBoundary;
+        readonly sse: boolean;
+        readonly bodyless: boolean;
       }) => Stream.Stream<A, Errors.ReadError, R>;
       readonly complete: Effect.Effect<boolean>;
       readonly json: boolean;
+      readonly requireJson?: boolean;
+      readonly stopAtTail?: boolean;
     }) => {
       type ReadState = {
         position: { readonly offset: string; readonly cursor?: string };
@@ -45,12 +106,19 @@ export const allocateRead = <S extends Schema.Top>(input: {
       };
       const page = Stream.unwrap(
         Effect.gen(function* () {
-          const response = yield* sendReadRequest({
-            connection: input.connection,
-            position: state.position,
-            longPoll: state.longPoll,
-            sse: state.sse,
-          });
+          const acquiredScope = yield* Ref.getAndSet(initialScope, undefined);
+          if (acquiredScope !== undefined)
+            yield* Effect.addFinalizer(() => Scope.close(acquiredScope, Exit.void));
+          const response =
+            initial.response ??
+            (yield* sendReadRequest({
+              connection: input.connection,
+              position: state.position,
+              longPoll: state.longPoll,
+              sse: state.sse,
+            }));
+          initial.response = undefined;
+          transport.response = response;
           if (state.sse) {
             const started = yield* Clock.currentTimeMillis;
             const base64 = response.headers["stream-sse-data-encoding"] === "base64";
@@ -96,16 +164,34 @@ export const allocateRead = <S extends Schema.Top>(input: {
                   Control: ({ control }) => {
                     const parts = pending.splice(0);
                     const closed = control.streamClosed === true;
+                    const boundary: ReadBoundary = {
+                      offset: control.streamNextOffset,
+                      cursor: control.streamCursor ?? state.position.cursor,
+                      upToDate: control.upToDate === true,
+                      streamClosed: closed,
+                    };
                     const source = Stream.fromIterable(parts).pipe(
                       Stream.mapEffect((data) => decodeSseData({ data, base64 })),
                     );
                     const decoded = options.json
                       ? source.pipe(
                           Stream.flatMap((bytes) =>
-                            options.decode({ source: Stream.succeed(bytes), final: false }),
+                            options.decode({
+                              source: Stream.succeed(bytes),
+                              final: false,
+                              boundary,
+                              sse: true,
+                              bodyless: false,
+                            }),
                           ),
                         )
-                      : options.decode({ source, final: closed });
+                      : options.decode({
+                          source,
+                          final: closed,
+                          boundary,
+                          sse: true,
+                          bodyless: false,
+                        });
                     return decoded.pipe(
                       Stream.concat(
                         Stream.fromEffectDrain(
@@ -119,7 +205,8 @@ export const allocateRead = <S extends Schema.Top>(input: {
                                 Predicate.isNotUndefined,
                               ),
                             };
-                            state.done = closed;
+                            state.done =
+                              closed || (options.stopAtTail === true && boundary.upToDate);
                           }),
                         ),
                       ),
@@ -174,7 +261,7 @@ export const allocateRead = <S extends Schema.Top>(input: {
           );
           if (
             response.status !== 204 &&
-            (options.json || input.hasSchema) &&
+            (options.json || options.requireJson || input.hasSchema) &&
             headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "application/json"
           )
             return yield* protocolViolation({ response, component: "read content-type" });
@@ -192,13 +279,22 @@ export const allocateRead = <S extends Schema.Top>(input: {
           );
           const done =
             headers["stream-closed"] === "true" ||
-            (input.connection.live === undefined && headers["stream-up-to-date"] === "true");
+            ((input.connection.live === undefined || options.stopAtTail === true) &&
+              headers["stream-up-to-date"] === "true");
           const decoded =
             response.status === 204 && options.json
               ? Stream.empty
               : options.decode({
                   source: response.status === 204 ? Stream.empty : body,
                   final: done,
+                  boundary: {
+                    offset: headers["stream-next-offset"],
+                    cursor: headers["stream-cursor"] ?? state.position.cursor,
+                    upToDate: headers["stream-up-to-date"] === "true",
+                    streamClosed: headers["stream-closed"] === "true",
+                  },
+                  sse: false,
+                  bodyless: response.status === 204,
                 });
           return decoded.pipe(
             Stream.concat(
@@ -258,6 +354,40 @@ export const allocateRead = <S extends Schema.Top>(input: {
     };
     const textDecoder = allocateTextDecoder();
     return {
+      acquireInitial,
+      transport,
+      batches: (settings: {
+        readonly stopAtTail: boolean;
+        readonly complete: Effect.Effect<boolean>;
+        readonly requireJson: boolean;
+        readonly incremental?: boolean;
+      }) =>
+        view<ReadBatch, never>({
+          decode: ({ source, boundary, sse, bodyless }) =>
+            settings.incremental === true && !sse
+              ? source.pipe(
+                  Stream.map((chunk) => ({
+                    ...boundary,
+                    chunks: [chunk],
+                    sse,
+                    bodyless,
+                    partial: true,
+                  })),
+                  Stream.concat(Stream.succeed({ ...boundary, chunks: [], sse, bodyless })),
+                )
+              : Stream.fromEffect(
+                  source.pipe(
+                    Stream.runCollect,
+                    Effect.map(
+                      (chunks) => ({ ...boundary, chunks, sse, bodyless }) satisfies ReadBatch,
+                    ),
+                  ),
+                ),
+          json: false,
+          requireJson: settings.requireJson,
+          complete: settings.complete,
+          stopAtTail: settings.stopAtTail,
+        }),
       bytes: view({ decode: ({ source }) => source, json: false, complete: Effect.succeed(true) }),
       text: view({
         decode: (input) => textDecoder.decode(input),

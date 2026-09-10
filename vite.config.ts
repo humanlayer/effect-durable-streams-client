@@ -6,6 +6,8 @@ export default defineConfig({
     "*": "vp check --fix",
   },
   pack: {
+    entry: ["src/index.ts", "src/async-await.ts"],
+    deps: { neverBundle: [/^effect(?:\/|$)/] },
     dts: {
       tsgo: true,
     },
@@ -14,6 +16,26 @@ export default defineConfig({
   lint: {
     extends: [recommended],
     overrides: [
+      {
+        files: ["src/async-await.ts", "src/client-runtime.ts", "src/client-response.ts"],
+        rules: {
+          "effecttsgo/async-function": "off",
+          "automation/no-try-catch": "off",
+          "automation/no-optional-function-parameters": "off",
+          "automation/no-multiple-function-params": "off",
+        },
+      },
+      {
+        files: ["src/client-errors.ts"],
+        rules: { "effecttsgo/extends-native-error": "off" },
+      },
+      {
+        files: ["tests/async-*.test.ts", "tests/integration/async-client.test.ts"],
+        rules: {
+          "effecttsgo/async-function": "off",
+          "automation/no-multiple-function-params": "off",
+        },
+      },
       {
         files: ["tests/**/*.test.ts"],
         rules: { "effecttsgo/strict-effect-provide": "off" },
@@ -26,15 +48,15 @@ export default defineConfig({
     jsPlugins: [
       {
         name: "anti-slop",
-        specifier: "./tools/oxlint/anti-slop/index.ts",
+        specifier: "./tools/oxlint/anti-slop/index.mjs",
       },
       {
         name: "anti-slop-effect",
-        specifier: "./tools/oxlint/anti-slop/effect/index.ts",
+        specifier: "./tools/oxlint/anti-slop/effect/index.mjs",
       },
       {
         name: "automation",
-        specifier: "./tools/oxlint/automation/index.ts",
+        specifier: "./tools/oxlint/automation/index.mjs",
       },
       {
         name: "better-tailwindcss",

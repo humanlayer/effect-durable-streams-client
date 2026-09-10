@@ -1,6 +1,6 @@
 import { Effect, Stream } from "effect";
-import { parseSse, SseEvent } from "../../src/sse.ts";
-import type { SseControl } from "../../src/protocol.ts";
+import { parseSse, SseEvent } from "../../src/sse.js";
+import type { SseControl } from "../../src/protocol.js";
 
 export const observeSse = <E, R>(input: {
   readonly source: Stream.Stream<Uint8Array, E, R>;

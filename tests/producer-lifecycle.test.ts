@@ -2,11 +2,36 @@ import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Duration, Effect, Exit, Fiber, Queue, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClient } from "effect/unstable/http";
-import { DurableStreamsClient } from "../src/index.ts";
-import { ScriptedResponse } from "./support/http-client.ts";
-import { makeProducerHttp, producerReply } from "./support/producer-http.ts";
+import { DurableStreamsClient } from "../src/index.js";
+import { ScriptedResponse } from "./support/http-client.js";
+import { makeProducerHttp, producerReply } from "./support/producer-http.js";
 
 describe("producer lifecycle", () => {
+  it.effect("failed initial auto-claim keeps native restart in the delivery error channel", () =>
+    Effect.gen(function* () {
+      const http = yield* makeProducerHttp;
+      yield* Effect.gen(function* () {
+        const client = yield* DurableStreamsClient.make({ url: "http://localhost/text" });
+        const producer = yield* client.producer({
+          producerId: "p",
+          autoClaim: true,
+          maxBatchBytes: 1,
+        });
+        const append = yield* producer.append({ value: "a" }).pipe(Effect.forkChild);
+        const request = yield* Queue.take(http.requests);
+        yield* Deferred.succeed(
+          request.reply,
+          ScriptedResponse.Response({ status: 503, headers: {} }),
+        );
+        const failure = yield* Fiber.join(append).pipe(Effect.flip);
+        expect(failure._tag).toBe("StreamUnavailableError");
+        expect(yield* producer.restart.pipe(Effect.flip)).toBe(failure);
+        expect(yield* producer.epoch).toBe(0);
+        expect(yield* producer.nextSeq).toBe(1);
+        expect(yield* Queue.size(http.requests)).toBe(0);
+      }).pipe(Effect.provide(http.layer));
+    }),
+  );
   it.effect("interrupted restart leaves admission open without advancing the epoch", () =>
     Effect.gen(function* () {
       const http = yield* makeProducerHttp;

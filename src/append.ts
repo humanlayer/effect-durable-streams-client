@@ -14,16 +14,21 @@ import {
   Stream,
 } from "effect";
 import type { HttpClient } from "effect/unstable/http";
-import { AppendOutcomeUnknownError, PayloadEncodeError, type AppendError } from "./errors.ts";
-import { captureSchemaFailure, combineAppendBodies, encodePayload } from "./encoding.ts";
-import { FieldValue } from "./headers.ts";
-import { appendStreamValue, type LifecycleContext } from "./lifecycle.ts";
+import { AppendOutcomeUnknownError, PayloadEncodeError, type AppendError } from "./errors.js";
+import {
+  captureSchemaFailure,
+  combineAppendBodies,
+  encodePayload,
+  type PreparedBody,
+} from "./encoding.js";
+import { FieldValue } from "./headers.js";
+import { appendStreamValue, type LifecycleContext } from "./lifecycle.js";
 import type {
   AppendInput,
   AppendResult,
   AppendStreamInput,
   DurableStreamsConnection,
-} from "./model.ts";
+} from "./model.js";
 
 type Entry = {
   executionContext: Context.Context<HttpClient.HttpClient> | undefined;
@@ -142,20 +147,26 @@ export const runOrdinaryBurst = ({
 export const allocateOrdinaryAppends = Effect.gen(function* () {
   const state = yield* Ref.make<Burst | undefined>(undefined);
   return <S extends Schema.Top>(
-    context: LifecycleContext<S> & { readonly input: AppendInput<S["Type"] | Uint8Array> },
+    context: LifecycleContext<S> & {
+      readonly input: AppendInput<S["Type"] | Uint8Array>;
+      readonly prepared?: PreparedBody;
+    },
   ) =>
     Effect.contextWith((executionContext: Context.Context<HttpClient.HttpClient>) =>
       Effect.gen(function* () {
         if (context.connection.batching === false) return yield* appendStreamValue(context);
         const contentType =
+          context.prepared?.contentType ??
           context.connection.contentType ??
           (context.schema === undefined ? "application/octet-stream" : "application/json");
-        const body = yield* encodePayload({
-          ...context,
-          value: context.input.value,
-          contentType,
-          operation: "append",
-        });
+        const body =
+          context.prepared?.body ??
+          (yield* encodePayload({
+            ...context,
+            value: context.input.value,
+            contentType,
+            operation: "append",
+          }));
         if (context.input.seq !== undefined)
           yield* Schema.decodeEffect(FieldValue)(context.input.seq);
         const entry: Entry = {

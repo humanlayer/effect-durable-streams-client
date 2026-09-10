@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/oxlint/configuration_schema.json",
-  "jsPlugins": ["./src/plugin.ts"],
+  "jsPlugins": ["./src/plugin.mjs"],
   "categories": { "correctness": "error" },
   "rules": {
     "diff-check/no-explicit-function-return-type": "error",

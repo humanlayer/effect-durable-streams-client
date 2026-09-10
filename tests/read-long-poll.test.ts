@@ -16,8 +16,8 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientRequest, HttpClientError } from "effect/unstable/http";
-import { DurableStreamsClient } from "../src/index.ts";
-import { makeReadHttp, readReply, type ReadReply } from "./support/read-http.ts";
+import { DurableStreamsClient } from "../src/index.js";
+import { makeReadHttp, readReply, type ReadReply } from "./support/read-http.js";
 
 const _poll = (input: {
   readonly offset: string;

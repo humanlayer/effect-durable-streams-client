@@ -2,9 +2,9 @@ import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, Queue, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClient } from "effect/unstable/http";
-import { makeReadHttp, readReply } from "../support/read-http.ts";
-import { AdapterState } from "./adapter-state.ts";
-import { handleCommand, processLine } from "./adapter.ts";
+import { makeReadHttp, readReply } from "../support/read-http.js";
+import { AdapterState } from "./adapter-state.js";
+import { handleCommand, processLine } from "./adapter.js";
 
 const _initialize = Effect.gen(function* () {
   yield* handleCommand({ type: "init", serverUrl: "https://streams.test" });

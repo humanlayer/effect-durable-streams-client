@@ -1,5 +1,43 @@
 import { Data, Effect, Match, Predicate, Schema, Stream, type SchemaIssue } from "effect";
-import { PayloadDecodeError, PayloadEncodeError } from "./errors.ts";
+import { PayloadDecodeError, PayloadEncodeError } from "./errors.js";
+import { ContentType } from "./model.js";
+
+export type PreparedBody = {
+  readonly contentType: string;
+  readonly body: Uint8Array;
+};
+
+export const prepareSerializedBody = (input: {
+  readonly value: string | Uint8Array;
+  readonly contentType: string;
+  readonly complete: boolean;
+}) =>
+  Effect.gen(function* () {
+    yield* Schema.decodeEffect(ContentType)(input.contentType);
+    const bytes = Predicate.isString(input.value)
+      ? new TextEncoder().encode(input.value)
+      : new Uint8Array(yield* Schema.decodeEffect(Schema.Uint8Array)(input.value));
+    const json = input.contentType.split(";")[0]?.trim().toLowerCase() === "application/json";
+    if (json) {
+      if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf)
+        return yield* new PayloadEncodeError({ component: "JSON BOM" });
+      const text = yield* Effect.try({
+        try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+        catch: () => new PayloadEncodeError({ component: "UTF-8" }),
+      });
+      yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Json))(text);
+    }
+    if (!json || input.complete) return { contentType: input.contentType, body: bytes };
+    const body = new Uint8Array(bytes.length + 2);
+    body[0] = 91;
+    body.set(bytes, 1);
+    body[body.length - 1] = 93;
+    return { contentType: input.contentType, body };
+  }).pipe(
+    Effect.catchTag("SchemaError", () =>
+      Effect.fail(new PayloadEncodeError({ component: "serialized payload" })),
+    ),
+  );
 
 export type EncodeInput<S extends Schema.Top> = {
   readonly schema?: S;
@@ -72,6 +110,7 @@ export const encodePayloads = <S extends Schema.Top>(
   },
 ) =>
   Effect.gen(function* () {
+    yield* Schema.decodeEffect(ContentType)(input.contentType);
     const json = input.contentType.split(";")[0]?.trim().toLowerCase() === "application/json";
     if (input.schema !== undefined && !json)
       return yield* new PayloadEncodeError({ component: "content-type" });

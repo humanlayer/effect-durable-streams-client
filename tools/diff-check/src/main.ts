@@ -6,14 +6,14 @@ import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
-import type { ChangedFileRule } from "./changed-file-rules.ts";
+import type { ChangedFileRule } from "./changed-file-rules.js";
 import {
   collectChangedFileViolations,
   collectViolations,
   type OxlintDiagnostic,
   parseAddedLineRanges,
   renderReport,
-} from "./diff-check.ts";
+} from "./diff-check.js";
 
 export interface DiffCheckConfig {
   readonly baseRef: string;

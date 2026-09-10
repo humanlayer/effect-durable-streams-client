@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { runLint } from "./main.ts";
-import { collectViolations } from "./diff-check.ts";
+import { runLint } from "./main.js";
+import { collectViolations } from "./diff-check.js";
 
 describe("error-severity lint process results", () => {
   it("reads successful lint output", () => {

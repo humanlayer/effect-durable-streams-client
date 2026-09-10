@@ -24,13 +24,13 @@ import {
   StreamUnavailableError,
   UnauthorizedError,
   type HeadError,
-} from "./errors.ts";
-import { StreamMetadata, type DurableStreamsConnection } from "./model.ts";
-import { parseHeadMetadata } from "./protocol.ts";
-import { buildRequest, type RequestInput } from "./request.ts";
-import { parseRetryAfter, requestRetrySchedule } from "./retry.ts";
-import * as Errors from "./errors.ts";
-import { captureSchemaFailure } from "./encoding.ts";
+} from "./errors.js";
+import { StreamMetadata, type DurableStreamsConnection } from "./model.js";
+import { parseHeadMetadata } from "./protocol.js";
+import { buildRequest, isRequestMetadataFailure, type RequestInput } from "./request.js";
+import { parseRetryAfter, requestRetrySchedule } from "./retry.js";
+import * as Errors from "./errors.js";
+import { captureSchemaFailure } from "./encoding.js";
 
 class HeadTransportFailure extends Data.TaggedError("HeadTransportFailure")<{
   readonly cause: HttpClientError.HttpClientError;
@@ -164,11 +164,13 @@ export const inspectStream = (
   }).pipe(
     Effect.catchTags({
       HeadTransportFailure: (failure) =>
-        Effect.logWarning("Stream transport failed", {
-          operation: input.operation,
-          url,
-          transport: failure.cause.reason._tag,
-        }).pipe(Effect.andThen(Effect.fail(new StreamUnavailableError({})))),
+        isRequestMetadataFailure(failure.cause)
+          ? Effect.fail(new ProtocolViolationError({ component: "request metadata" }))
+          : Effect.logWarning("Stream transport failed", {
+              operation: input.operation,
+              url,
+              transport: failure.cause.reason._tag,
+            }).pipe(Effect.andThen(Effect.fail(new StreamUnavailableError({})))),
       HeadResponseFailure: (failure) =>
         Effect.gen(function* () {
           yield* Effect.logWarning("Stream request rejected", {
@@ -283,7 +285,10 @@ export const sendMutation = (input: MutationRequest) => {
             Effect.catchReason("HttpClientError", "StatusCodeError", (reason) =>
               Effect.succeed(reason.response),
             ),
-            Effect.mapError((cause) => new MutationFailure({ cause, retryable: true })),
+            Effect.mapError(
+              (cause) =>
+                new MutationFailure({ cause, retryable: !isRequestMetadataFailure(cause) }),
+            ),
           );
         if (response.status >= 200 && response.status < 300) return response;
         const snapshot = yield* _snapshotResponse({ response, url, operation: input.operation });
@@ -376,16 +381,19 @@ export const sendReadRequest = (input: {
     ),
     Effect.retry({
       while: (failure) =>
-        failure.response === undefined ||
-        failure.response.status === 429 ||
-        failure.response.status >= 500 ||
-        (failure.response.status >= 300 &&
-          failure.response.status < 400 &&
-          failure.response.status !== 304),
+        (failure.cause === undefined || !isRequestMetadataFailure(failure.cause)) &&
+        (failure.response === undefined ||
+          failure.response.status === 429 ||
+          failure.response.status >= 500 ||
+          (failure.response.status >= 300 &&
+            failure.response.status < 400 &&
+            failure.response.status !== 304)),
       schedule: requestRetrySchedule(input.connection),
     }),
     Effect.catchTag("ReadRequestFailure", (failure: ReadRequestFailure) => {
       const response = failure.response;
+      if (failure.cause !== undefined && isRequestMetadataFailure(failure.cause))
+        return Effect.fail(new ProtocolViolationError({ component: "request metadata" }));
       if (response === undefined) return Effect.fail(new Errors.StreamUnavailableError({}));
       return Match.value(response.status).pipe(
         Match.when(400, () => Effect.fail(new Errors.InvalidRequestError({ response }))),

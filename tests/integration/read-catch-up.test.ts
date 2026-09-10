@@ -1,10 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer, Option, Schema, SchemaGetter, Stream } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
-import { DurableStreamsClient } from "../../src/index.ts";
-import { acquireDurableStreamServer } from "../support/server.ts";
-import { AdapterState } from "../conformance/adapter-state.ts";
-import { handleCommand } from "../conformance/adapter.ts";
+import { DurableStreamsClient } from "../../src/index.js";
+import { acquireDurableStreamServer } from "../support/server.js";
+import { AdapterState } from "../conformance/adapter-state.js";
+import { handleCommand } from "../conformance/adapter.js";
 
 describe("reference server finite catch-up", () => {
   it.effect(

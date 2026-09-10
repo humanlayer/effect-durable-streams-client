@@ -1,10 +1,85 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Array as Arr, Deferred, Duration, Effect, Fiber, Option, Queue, Stream } from "effect";
+import {
+  Array as Arr,
+  Deferred,
+  Duration,
+  Effect,
+  Fiber,
+  Option,
+  Queue,
+  Schema,
+  Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
-import { DurableStreamsClient } from "../src/index.ts";
-import { makeProducerHttp, producerReply } from "./support/producer-http.ts";
+import { DurableStreamsClient } from "../src/index.js";
+import { makeProducerHttp, producerReply } from "./support/producer-http.js";
+import { acquireProducer } from "../src/producer.js";
+import { prepareSerializedBody } from "../src/encoding.js";
 
 describe("producer batching", () => {
+  it.effect(
+    "groups large homogeneous bursts at content-type boundaries without merging A/B/A",
+    () =>
+      Effect.gen(function* () {
+        const http = yield* makeProducerHttp;
+        yield* Effect.gen(function* () {
+          const count = 10000;
+          const groups = [
+            { contentType: "text/plain", value: "x", expected: "x".repeat(count) },
+            {
+              contentType: "application/json",
+              value: "[1,2]",
+              expected: `[${Array.from({ length: count }, () => "[1,2]").join(",")}]`,
+            },
+            { contentType: "text/plain", value: "z", expected: "z".repeat(count) },
+          ];
+          const producer = yield* acquireProducer<typeof Schema.Json>({
+            connection: { url: new URL("http://localhost/bursts") },
+            input: {
+              producerId: "writer",
+              maxBatchBytes: 1000000,
+              linger: Duration.hours(1),
+              maxInFlight: 1,
+            },
+            facade: { contentType: () => "text/plain", onBatchExit: () => Effect.void },
+          });
+          for (const [index, group] of groups.entries()) {
+            const prepared = yield* prepareSerializedBody({
+              value: group.value,
+              contentType: group.contentType,
+              complete: false,
+            });
+            yield* Effect.forEach(Arr.range(1, count), () => producer.admitPrepared(prepared), {
+              discard: true,
+            });
+            expect(producer.snapshot()).toMatchObject({
+              pendingCount: count,
+              inFlightCount: index,
+              nextSeq: index,
+            });
+          }
+          const flush = yield* producer.flush.pipe(Effect.forkChild);
+          for (const [seq, group] of groups.entries()) {
+            const request = yield* Queue.take(http.requests);
+            expect(request.headers).toMatchObject({
+              "content-type": group.contentType,
+              "producer-seq": String(seq),
+            });
+            expect(new TextDecoder().decode(request.body)).toBe(group.expected);
+            yield* Deferred.succeed(request.reply, producerReply({ seq }));
+          }
+          yield* Fiber.join(flush);
+          expect(producer.snapshot()).toMatchObject({
+            pendingCount: 0,
+            inFlightCount: 0,
+            nextSeq: 3,
+            lastSuccessfulOffset: "offset2",
+          });
+          yield* TestClock.adjust("2 hours");
+          expect(yield* Queue.size(http.requests)).toBe(0);
+        }).pipe(Effect.provide(http.layer));
+      }),
+  );
   it.effect(
     "checks threshold after insertion without counting JSON framing and completes shared receipts",
     () =>

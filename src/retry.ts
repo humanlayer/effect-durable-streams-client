@@ -1,5 +1,5 @@
 import { Clock, DateTime, Duration, Effect, Option, Random, Schedule } from "effect";
-import type { DurableStreamsConnection } from "./model.ts";
+import type { DurableStreamsConnection } from "./model.js";
 
 export const parseRetryAfter = (raw: string | undefined) =>
   Effect.gen(function* () {

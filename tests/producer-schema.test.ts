@@ -14,9 +14,9 @@ import {
   Stream,
 } from "effect";
 import type { HttpClient } from "effect/unstable/http";
-import { DurableStreamsClient } from "../src/index.ts";
-import { ScriptedResponse } from "./support/http-client.ts";
-import { makeProducerHttp, producerReply } from "./support/producer-http.ts";
+import { DurableStreamsClient } from "../src/index.js";
+import { ScriptedResponse } from "./support/http-client.js";
+import { makeProducerHttp, producerReply } from "./support/producer-http.js";
 
 describe("producer schema and dependencies", () => {
   it.effect(
@@ -56,8 +56,13 @@ describe("producer schema and dependencies", () => {
         expectTypeOf<Parameters<typeof producer.append>[0]["value"]>().toEqualTypeOf<{
           readonly id: string;
         }>();
-        const append = producer.append({ value: { id: "a" } });
-        const close = producer.close({ value: { id: "last" } });
+        const extra = {
+          prepared: { contentType: "text/plain", body: new TextEncoder().encode("bypass") },
+        };
+        const appendInput = { value: { id: "a" }, ...extra };
+        const closeInput = { value: { id: "last" }, ...extra };
+        const append = producer.append(appendInput);
+        const close = producer.close(closeInput);
         expectTypeOf<Effect.Services<typeof append>>().toEqualTypeOf<Encoder>();
         expectTypeOf<Effect.Services<typeof close>>().toEqualTypeOf<Encoder>();
         const ingest = Stream.make({ id: "sink" }).pipe(Stream.run(producer.sink));
@@ -115,6 +120,15 @@ describe("producer schema and dependencies", () => {
         expect((yield* producer.append({ value: "x" }).pipe(Effect.flip))._tag).toBe(
           "PayloadEncodeError",
         );
+        const bypass = {
+          value: "x",
+          prepared: {
+            contentType: "application/json",
+            body: new TextEncoder().encode('["valid"]'),
+          },
+        };
+        expect((yield* producer.append(bypass).pipe(Effect.flip))._tag).toBe("PayloadEncodeError");
+        expect((yield* producer.close(bypass).pipe(Effect.flip))._tag).toBe("PayloadEncodeError");
         expect((yield* Stream.make("y").pipe(Stream.run(producer.sink), Effect.flip))._tag).toBe(
           "PayloadEncodeError",
         );

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Stream } from "effect";
-import { decodeSseData, parseSse, SseEvent } from "../src/sse.ts";
+import { decodeSseData, parseSse, SseEvent } from "../src/sse.js";
 
 describe("SSE framing", () => {
   for (const ending of ["\n", "\r", "\r\n"]) {

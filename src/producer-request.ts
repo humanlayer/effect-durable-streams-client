@@ -1,9 +1,10 @@
 import { Data, Effect, Match, Option, Predicate, Record, Schema } from "effect";
-import * as Errors from "./errors.ts";
-import { ProducerAppendResult, type DurableStreamsConnection } from "./model.ts";
-import { ProducerGapHeaders, ProducerNumber, ProducerSuccessHeaders } from "./protocol.ts";
-import { freezeErrorResponse, protocolViolation, sendMutation } from "./transport.ts";
-import { captureSchemaFailure } from "./encoding.ts";
+import * as Errors from "./errors.js";
+import { ProducerAppendResult, type DurableStreamsConnection } from "./model.js";
+import { ProducerGapHeaders, ProducerNumber, ProducerSuccessHeaders } from "./protocol.js";
+import { freezeErrorResponse, protocolViolation, sendMutation } from "./transport.js";
+import { captureSchemaFailure } from "./encoding.js";
+import { isRequestMetadataFailure } from "./request.js";
 
 export type ProducerResponse = Data.TaggedEnum<{
   Delivered: { readonly result: ProducerAppendResult };
@@ -69,6 +70,8 @@ export const sendProducerRequest = (input: ProducerRequest) =>
     });
   }).pipe(
     Effect.catchTag("MutationFailure", (failure) => {
+      if (failure.cause !== undefined && isRequestMetadataFailure(failure.cause))
+        return Effect.fail(new Errors.ProtocolViolationError({ component: "request metadata" }));
       const response = failure.response;
       if (response === undefined) return Effect.fail(new Errors.StreamUnavailableError({}));
       return Match.value(response.status).pipe(

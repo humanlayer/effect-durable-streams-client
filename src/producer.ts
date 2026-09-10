@@ -22,18 +22,18 @@ import {
   ProducerSequenceGapError,
   ProtocolViolationError,
   type ProducerError,
-} from "./errors.ts";
-import { combineAppendBodies, encodePayload } from "./encoding.ts";
+} from "./errors.js";
+import { combineAppendBodies, encodePayload, type PreparedBody } from "./encoding.js";
 import {
   CloseResult,
   ProducerOptions,
   type ProducerAppendInput,
   type ProducerAppendResult,
   type ProducerCloseInput,
-} from "./model.ts";
-import type { LifecycleContext } from "./lifecycle.ts";
-import { ProducerResponse, sendProducerRequest, type ProducerRequest } from "./producer-request.ts";
-import { freezeErrorResponse } from "./transport.ts";
+} from "./model.js";
+import type { LifecycleContext } from "./lifecycle.js";
+import { ProducerResponse, sendProducerRequest, type ProducerRequest } from "./producer-request.js";
+import { freezeErrorResponse } from "./transport.js";
 
 export type IdempotentProducer<A, R = never> = {
   readonly append: (
@@ -54,11 +54,13 @@ export type IdempotentProducer<A, R = never> = {
 type Entry = {
   readonly id: number;
   readonly body: Uint8Array;
+  readonly contentType: string;
   readonly receipt: Deferred.Deferred<ProducerAppendResult, ProducerError>;
 };
 type Batch = {
   readonly entries: ReadonlyArray<Entry>;
   readonly body: Uint8Array;
+  readonly contentType: string;
   readonly completion: Deferred.Deferred<ProducerAppendResult, ProducerError>;
   tuple: { readonly epoch: number; readonly seq: number } | undefined;
   readonly firstClaim: boolean;
@@ -66,7 +68,17 @@ type Batch = {
 
 export const acquireProducer = Effect.fn("durable_streams.producer.make")(function* <
   S extends Schema.Top,
->(context: LifecycleContext<S> & { readonly input: ProducerOptions }) {
+>(
+  context: LifecycleContext<S> & {
+    readonly input: ProducerOptions;
+    readonly facade?: {
+      readonly contentType: () => string;
+      readonly onBatchExit: (
+        exit: Exit.Exit<ProducerAppendResult, ProducerError>,
+      ) => Effect.Effect<void>;
+    };
+  },
+) {
   type ProducerState = {
     epoch: number;
     nextSeq: number;
@@ -105,13 +117,14 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
   const mutex = yield* Semaphore.make(1);
   const lifecycle = yield* Semaphore.make(1);
   const maxInFlight = options.maxInFlight ?? 5;
-  const tasks = yield* Queue.make<Batch>({ capacity: maxInFlight });
-  const claim = yield* Deferred.make<void, ProducerError>();
+  const tasks = yield* Queue.make<Batch>(
+    context.facade === undefined ? { capacity: maxInFlight } : {},
+  );
+  const claim = { current: yield* Deferred.make<void, ProducerError>() };
   const stopped = yield* Deferred.make<never>();
   const contentType =
     context.connection.contentType ??
     (context.schema === undefined ? "application/octet-stream" : "application/json");
-  const json = contentType.split(";")[0]?.trim().toLowerCase() === "application/json";
   const state: ProducerState = {
     epoch: options.epoch ?? 0,
     nextSeq: 0,
@@ -240,7 +253,7 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
     while (true) {
       const batch = yield* Queue.take(tasks);
       const outcome = yield* Effect.gen(function* () {
-        if (!state.claimed && !batch.firstClaim) yield* Deferred.await(claim);
+        if (!state.claimed && !batch.firstClaim) yield* Deferred.await(claim.current);
         const tuple = batch.tuple ?? reserve(batch);
         if (!Number.isSafeInteger(tuple.seq))
           return yield* new ProtocolViolationError({ component: "producer sequence exhausted" });
@@ -251,7 +264,7 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
           () =>
             send({
               connection: context.connection,
-              contentType,
+              contentType: batch.contentType,
               producerId: options.producerId,
               ...tuple,
               body: batch.body,
@@ -268,9 +281,10 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
           state.claimed = true;
           for (const held of batches) if (held.tuple === undefined) reserve(held);
         }
-        yield* Deferred.done(claim, Exit.isSuccess(outcome) ? Exit.void : outcome);
+        yield* Deferred.done(claim.current, Exit.isSuccess(outcome) ? Exit.void : outcome);
       }
       complete({ batch, outcome });
+      if (context.facade !== undefined) yield* context.facade.onBatchExit(outcome);
     }
   });
   const emit = Effect.uninterruptibleMask((restore) =>
@@ -282,10 +296,17 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
       state.generation++;
       const timer = state.timer;
       state.timer = undefined;
-      if (timer !== undefined) yield* Fiber.interrupt(timer);
+      if (timer !== undefined) {
+        if (context.facade === undefined) yield* Fiber.interrupt(timer);
+        else timer.interruptUnsafe();
+      }
       const batch: Batch = {
         entries,
-        body: combineAppendBodies({ bodies: entries.map((entry) => entry.body), contentType }),
+        body: combineAppendBodies({
+          bodies: entries.map((entry) => entry.body),
+          contentType: entries[0].contentType,
+        }),
+        contentType: entries[0].contentType,
         completion: Deferred.makeUnsafe(),
         tuple: undefined,
         firstClaim: !state.claimed && !state.claiming,
@@ -320,7 +341,11 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
           yield* Effect.forEach(receipts, (receipt) => Deferred.await(receipt).pipe(Effect.exit), {
             discard: true,
           });
-          if (state.firstFailure !== undefined && state.firstFailure.id <= watermark)
+          if (
+            context.facade === undefined &&
+            state.firstFailure !== undefined &&
+            state.firstFailure.id <= watermark
+          )
             return yield* state.firstFailure.exit;
           return undefined;
         }),
@@ -328,22 +353,37 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
       Effect.raceFirst(Deferred.await(stopped)),
       Effect.withSpan("durable_streams.producer.flush"),
     );
-  const admit = (input: ProducerAppendInput<S["Type"] | Uint8Array>) =>
+  const admit = (
+    input: ProducerAppendInput<S["Type"] | Uint8Array> & { readonly prepared?: PreparedBody },
+  ) =>
     Effect.gen(function* () {
       if (state.mode !== "open") return yield* new ProducerClosedError();
-      const body = yield* encodePayload({
-        ...context,
-        value: input.value,
-        contentType,
-        operation: "append",
-      });
+      const body =
+        input.prepared?.body ??
+        (yield* encodePayload({
+          ...context,
+          value: input.value,
+          contentType,
+          operation: "append",
+        }));
       return yield* mutex.withPermit(
         Effect.gen(function* () {
           if (state.mode !== "open") return yield* new ProducerClosedError();
-          const entry: Entry = { id: ++state.id, body, receipt: Deferred.makeUnsafe() };
+          const entryContentType = input.prepared?.contentType ?? contentType;
+          const firstPending = state.pending[0];
+          if (firstPending !== undefined && firstPending.contentType !== entryContentType)
+            yield* emit;
+          const entry: Entry = {
+            id: ++state.id,
+            body,
+            contentType: entryContentType,
+            receipt: Deferred.makeUnsafe(),
+          };
           outstanding.set(entry.id, entry);
           state.pending.push(entry);
-          state.bytes += body.length - (json ? 2 : 0);
+          state.bytes +=
+            body.length -
+            (entryContentType.split(";")[0]?.trim().toLowerCase() === "application/json" ? 2 : 0);
           if (state.bytes >= (options.maxBatchBytes ?? 1048576)) yield* emit;
           else if (state.timer === undefined) {
             const generation = state.generation;
@@ -364,7 +404,11 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
           return entry.receipt;
         }),
       );
-    }).pipe(Effect.raceFirst(Deferred.await(stopped)));
+    }).pipe((effect) =>
+      context.facade === undefined
+        ? effect.pipe(Effect.raceFirst(Deferred.await(stopped)))
+        : effect,
+    );
   yield* Effect.forEach(Arr.range(1, maxInFlight), () => worker.pipe(Effect.forkIn(scope)), {
     discard: true,
   });
@@ -382,7 +426,7 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
     }),
   );
   const append = (input: ProducerAppendInput<S["Type"] | Uint8Array>) =>
-    admit(input).pipe(
+    admit({ value: input.value }).pipe(
       Effect.flatMap(Deferred.await),
       Effect.withSpan("durable_streams.producer.append"),
     );
@@ -407,10 +451,11 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
     restart: lifecycle
       .withPermit(
         Effect.gen(function* () {
-          if (state.mode !== "open") return yield* new ProducerClosedError();
+          if (state.mode !== "open" && context.facade === undefined)
+            return yield* new ProducerClosedError();
           yield* mutex.withPermit(
             Effect.sync(() => {
-              state.mode = "closing";
+              if (context.facade === undefined) state.mode = "closing";
             }),
           );
           yield* flush;
@@ -418,78 +463,110 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
             return yield* new ProtocolViolationError({ component: "producer epoch exhausted" });
           state.epoch++;
           state.nextSeq = 0;
+          if (state.closeResult === undefined) state.closeRequest = undefined;
           progress.through = -1;
           progress.failure = undefined;
           sequences.clear();
-          state.mode = "open";
+          if (context.facade !== undefined) {
+            claim.current = Deferred.makeUnsafe();
+            state.claimed = !options.autoClaim;
+            state.claiming = false;
+            state.firstFailure = undefined;
+          }
+          if (context.facade === undefined) state.mode = "open";
           return undefined;
         }).pipe(
           Effect.ensuring(
             Effect.sync(() => {
-              if (state.mode === "closing") state.mode = "open";
+              if (context.facade === undefined && state.mode === "closing") state.mode = "open";
             }),
           ),
         ),
       )
       .pipe(Effect.withSpan("durable_streams.producer.restart")),
-    close: (input) =>
-      lifecycle
-        .withPermit(
-          Effect.gen(function* () {
-            if (state.closeResult !== undefined) return state.closeResult;
-            if (state.mode === "detached" || state.mode === "stopped")
-              return yield* new ProducerClosedError();
-            if (state.closeBody === undefined) {
-              const body = Predicate.hasProperty(input, "value")
-                ? yield* encodePayload({
-                    ...context,
-                    value: input.value,
-                    contentType,
-                    operation: "close",
-                  })
-                : undefined;
-              yield* mutex.withPermit(
-                Effect.sync(() => {
-                  state.mode = "closing";
-                  state.closeBody = Record.filter({ body }, Predicate.isNotUndefined);
-                }),
-              );
-            }
-            if (state.closeRequest === undefined) {
-              yield* flush;
-              state.closeRequest = {
-                connection: context.connection,
-                contentType,
-                producerId: options.producerId,
-                epoch: state.epoch,
-                seq: state.nextSeq,
-                close: true,
-                ...state.closeBody,
-              };
-            }
-            const result = yield* send(state.closeRequest).pipe(
-              Effect.forkIn(scope),
-              Effect.flatMap((fiber) =>
-                Fiber.join(fiber).pipe(Effect.onInterrupt(() => Fiber.interrupt(fiber))),
-              ),
-            );
-            if (result.offset === undefined)
-              return yield* new ProtocolViolationError({ component: "producer close offset" });
-            state.nextSeq++;
-            recordOffset(result);
-            state.closeResult = CloseResult.make({ finalOffset: result.offset });
-            return state.closeResult;
-          }),
-        )
-        .pipe(
-          Effect.raceFirst(Deferred.await(stopped)),
-          Effect.withSpan("durable_streams.producer.close"),
-        ),
+    close: (input) => close(Predicate.hasProperty(input, "value") ? { value: input.value } : {}),
     epoch: Effect.sync(() => state.epoch),
     nextSeq: Effect.sync(() => state.nextSeq),
     pendingCount: Effect.sync(() => state.pending.length),
     inFlightCount: Effect.sync(() => state.active),
     lastSuccessfulOffset: Effect.sync(() => Option.fromUndefinedOr(state.offset)),
   };
-  return producer;
+  const close = (
+    input: ProducerCloseInput<S["Type"] | Uint8Array> & { readonly prepared?: PreparedBody },
+  ) =>
+    lifecycle
+      .withPermit(
+        Effect.gen(function* () {
+          if (state.closeResult !== undefined) return state.closeResult;
+          if (
+            state.mode === "stopped" ||
+            (state.mode === "detached" && context.facade === undefined)
+          )
+            return yield* new ProducerClosedError();
+          if (state.closeBody === undefined) {
+            const body =
+              input.prepared !== undefined
+                ? input.prepared.body
+                : Predicate.hasProperty(input, "value")
+                  ? yield* encodePayload({
+                      ...context,
+                      value: input.value,
+                      contentType,
+                      operation: "close",
+                    })
+                  : undefined;
+            yield* mutex.withPermit(
+              Effect.sync(() => {
+                state.mode = "closing";
+                state.closeBody = Record.filter({ body }, Predicate.isNotUndefined);
+              }),
+            );
+          }
+          if (state.closeRequest === undefined) {
+            yield* flush;
+            state.closeRequest = {
+              connection: context.connection,
+              contentType:
+                input.prepared?.contentType ?? context.facade?.contentType() ?? contentType,
+              producerId: options.producerId,
+              epoch: state.epoch,
+              seq: state.nextSeq,
+              close: true,
+              ...state.closeBody,
+            };
+          }
+          const result = yield* context.facade !== undefined
+            ? send(state.closeRequest)
+            : send(state.closeRequest).pipe(
+                Effect.forkIn(scope),
+                Effect.flatMap((fiber) =>
+                  Fiber.join(fiber).pipe(Effect.onInterrupt(() => Fiber.interrupt(fiber))),
+                ),
+              );
+          if (result.offset === undefined)
+            return yield* new ProtocolViolationError({ component: "producer close offset" });
+          state.nextSeq++;
+          recordOffset(result);
+          state.closeResult = CloseResult.make({ finalOffset: result.offset });
+          return state.closeResult;
+        }),
+      )
+      .pipe(
+        Effect.raceFirst(Deferred.await(stopped)),
+        Effect.withSpan("durable_streams.producer.close"),
+      );
+  return {
+    ...producer,
+    native: producer,
+    admitPrepared: (prepared: PreparedBody) => admit({ value: null, prepared }),
+    closePrepared: (prepared: PreparedBody | undefined) => close({ prepared }),
+    releaseWorkers: Scope.close(scope, Exit.void).pipe(Effect.andThen(Queue.shutdown(tasks))),
+    snapshot: () => ({
+      epoch: state.epoch,
+      nextSeq: state.nextSeq,
+      pendingCount: state.pending.length,
+      inFlightCount: batches.size,
+      lastSuccessfulOffset: state.offset,
+    }),
+  };
 });

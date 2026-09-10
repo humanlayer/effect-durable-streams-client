@@ -1,10 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer, Ref, Schema, SchemaGetter } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/unstable/http";
-import { acquireDurableStreamServer } from "../support/server.ts";
-import { AdapterState } from "./adapter-state.ts";
-import { handleCommand } from "./adapter.ts";
-import { DurableStreamsClient } from "../../src/index.ts";
+import { acquireDurableStreamServer } from "../support/server.js";
+import { AdapterState } from "./adapter-state.js";
+import { handleCommand } from "./adapter.js";
+import { DurableStreamsClient } from "../../src/index.js";
 
 const AdapterLive = Layer.merge(
   FetchHttpClient.layer,

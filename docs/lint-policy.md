@@ -4,11 +4,14 @@
 
 ## Narrow exceptions
 
+- `src/async-await.ts`, `src/client-runtime.ts`, and `src/client-response.ts` are foreign-runtime interpreters, not native Effect services. Async functions, JS try/finally/error handling, optional parameters and positional Fetch/upstream method arguments are permitted only in these three files. Native protocol engines retain all existing rules. Facade-facing tests permit async functions and positional Fetch callbacks so tests exercise the actual Promise API rather than relabeling native tests.
+- `src/client-errors.ts` permits native Error inheritance for facade-owned JavaScript rejection classes. Native errors remain tagged and are mapped with exhaustive typed catches before exit interpretation. The optional ignored cancellation reason is a deliberate Web API boundary, not parsed application input.
+
 - `effecttsgo/strict-effect-provide` is off only for `tests/**/*.test.ts`. Tests are application composition boundaries: they install isolated real or scripted dependencies, including deliberately distinct caller contexts used to verify batching ownership. Every other Effect rule remains enabled for tests. The conformance adapter has one local directive at its application composition root; its other code is not exempt.
 - `no-underscore-dangle` is off in the root and automation factory because it directly conflicts with the required private-function underscore prefix and Effect's `_tag`. The custom `automation/private-function-prefix` rule stays an error. Oxlint does not offer a private-prefix-pattern allowance, so a redundant opposing rule is disabled rather than maintaining an identifier-by-identifier list.
 - The positive-`Infinity` branch of `backoffOptions.maxRetries` has one local `schema-number` directive. The branch's existing equality filter still accepts only positive infinity; the other branch still accepts nonnegative integers. This preserves the approved unlimited retry policy without accepting `NaN` or negative infinity. The adapter's TTL and sequence numbers use `Schema.Finite` instead.
 
-The two local directives carry `SAFETY:` explanations, which the source-comment rules permit. No Effect rules are globally disabled, no test directories are excluded, and no diff-check rule is disabled. Existing tool-source exclusions remain unchanged.
+Local directives carry `SAFETY:` explanations, which the source-comment rules permit. The facade additionally identifies Web cancellation reasons, optional producer UUID generation and the AbortController joining advanced parent lifetime to Promise children. No Effect rules are globally disabled, no test directories are excluded, and no diff-check rule is disabled. Existing tool-source exclusions remain unchanged. The required Effect peer/dev migration changes `bun.lock`, so diff-check's intentional key-file review alert remains visible rather than being suppressed.
 
 ## Implementation constraints
 

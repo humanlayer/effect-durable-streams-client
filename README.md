@@ -1,6 +1,6 @@
 # @humanlayer/effect-durable-streams-client
 
-An Effect v4-native Durable Streams client: typed payload streams, bidirectional schemas, ordinary append batching, and scoped idempotent producers. This is the native release candidate, not a drop-in Promise replacement for `@durable-streams/client`.
+An Effect v4-native Durable Streams client with a Promise facade over the same protocol engines. The root exports native Effects, Streams and Sinks; `/async-await` exports JavaScript handles, callbacks and Web Streams. This release candidate is not a blanket drop-in replacement for every upstream feature.
 
 ## Install
 
@@ -8,7 +8,83 @@ An Effect v4-native Durable Streams client: typed payload streams, bidirectional
 npm install @humanlayer/effect-durable-streams-client@rc effect@4.0.0-rc.112
 ```
 
-ESM only, with generated TypeScript declarations. Effect `4.0.0-rc.112` is currently an exact runtime dependency (not bundled). Use the same version in your application; other Effect releases, especially Effect 3, are not claimed compatible. The future async facade and Effect peer policy are separate design work. No Node platform package is required by this library; provide a suitable Effect HTTP layer at your application's runtime boundary.
+ESM only, with generated TypeScript declarations. Effect `4.0.0-rc.112` is a required exact peer dependency, external to both entries. Install that version explicitly, including in Promise-only applications. Other Effect releases, especially Effect 3, are not claimed compatible. No upstream SDK or Node platform runtime package is required. Ordinary Promise callers use Fetch by default; native callers provide a suitable Effect HTTP layer.
+
+## Plain async/await
+
+```ts
+import {
+  DurableStream,
+  IdempotentProducer as AsyncProducer,
+} from "@humanlayer/effect-durable-streams-client/async-await";
+
+const asyncOrders = await DurableStream.create({
+  url: "https://streams.example.com/async-orders",
+  contentType: "application/json",
+  body: '[{"id":"initial"}]',
+});
+await asyncOrders.append('{"id":"ordinary"}');
+const asyncWriter = new AsyncProducer(asyncOrders, "orders-writer", {
+  onError(error) {
+    console.error(error.code);
+  },
+});
+asyncWriter.append('{"id":"buffered"}'); // synchronous void admission, not delivery
+await asyncWriter.flush(); // drained, not proof that every batch succeeded
+await asyncWriter.close('{"id":"final"}'); // remote EOF
+const asyncRead = await asyncOrders.stream({ live: false });
+const asyncMessages = await asyncRead.json();
+await asyncRead.closed;
+```
+
+`new DurableStream(options)` is cold. Static `create`, `connect`, `head` and `delete` perform their named operations; missing `head` returns `{ exists: false }`, and missing `connect` still returns a handle. Ordinary append accepts serialized strings/bytes (or their Promises), copies direct bytes before admission, and preserves serialized JSON lexemes. Each JSON append is one message, including a nested array; create's body is a complete initial request. Raw methods do not stringify objects or apply a configured schema.
+
+Every `.stream()` owns an independent read session and resolves after initial headers are validated, without consuming the body. The default live mode is long-poll; `true` means long-poll, not automatic negotiation. Promise collectors stop at the first tail or closure even on live sessions. Choose exactly one of `body/text/json`, `bodyStream/textStream/jsonStream`, or `subscribeBytes/subscribeText/subscribeJson`. JSON is inferred as `JsonValue` or from a schema; there is no unchecked `json<T>()`. Callback batches include empty/control boundaries and safe offset/cursor metadata. Callbacks run sequentially and are awaited; rejection fails `closed` without acknowledging that boundary. Web streams support async iteration and acknowledge only fully delivered boundaries.
+
+Call `cancel()`, unsubscribe, break iteration, or cancel the Web reader to stop a read. `closed` joins SDK cleanup, resolves for deliberate cancellation, and rejects for read/decode/callback failures. An ignored response still owns resources: consume or cancel it. A noncooperative user callback or custom fetch cannot be forcibly stopped, but late completion cannot acknowledge or restart work. Response headers are defensive snapshots; `statusText` is empty because the native HTTP abstraction does not expose a reason phrase.
+
+Producer `append` throws invalid/closed admission errors synchronously and returns `undefined`. Delivery failures go to optional `onError`, once per failed physical batch. `flush` drains and does not replay those failures; `detach` stops admission and drains without EOF, suppressing drain failures. Repeated detach returns immediately. Close-request failure rejects independently. Restart advances epoch/sequence but does not reopen a detached/closed producer. Raw producer admission is not whole-input backpressure: `maxInFlight` bounds HTTP concurrency, not retained input memory. Use native Sink for backpressured ingestion.
+
+`handle.writable()` is admission-oriented: writes do not wait for delivery, close attempts remote EOF then reports the first observed batch failure, and abort launches observed background detach/drain without promising a cleanup join. Ordinary buffered appends retain reference transient retries and can duplicate accepted bytes; producer sends use protocol recovery only, not general 429/5xx retries. There is no mandatory producer receipt, appendBatch, or dispose API.
+
+Headers/params may contain async callbacks on ordinary handles and read options; they run per attempt. Protocol-owned keys cannot be overridden. Custom `fetch` receives the request signal. `AbortSignal` belongs at Promise operation boundaries, not the native root API.
+
+## Optional typed facade
+
+These examples share the Effect imports in the native section below; ordinary schema users need only import `Schema`.
+
+```ts
+const TypedEvent = Schema.Struct({ id: Schema.String });
+const typedEvents = await DurableStream.createWithSchema({
+  url: "https://streams.example.com/typed-events",
+  schema: TypedEvent,
+});
+await typedEvents.appendJson({ id: "one" });
+await typedEvents.appendJsonBatch([{ id: "two" }, { id: "three" }]);
+const typedRead = await typedEvents.stream({ live: false });
+const typedMessages = await typedRead.json(); // Array<{ readonly id: string }>
+```
+
+`DurableStream.withSchema(options)` constructs without HTTP; instance `.withSchema(schema)` specializes an existing raw handle. `appendJson` encodes one value; `appendJsonBatch` submits values in order and may have an accepted prefix if a later value fails. Raw append/create/close bypass the schema. Typed upload/writable and synchronous typed producers are deliberately omitted; use `.raw` for serialized APIs. Serviceful schemas require the advanced acquisition below rather than erasing their requirements.
+
+```ts
+import { makeEffectClient } from "@humanlayer/effect-durable-streams-client/async-await";
+
+const advancedProgram = Effect.gen(function* () {
+  const client = yield* makeEffectClient({
+    url: "https://streams.example.com/advanced-events",
+    schema: TypedEvent,
+  });
+  yield* Effect.promise(async () => {
+    await client.create();
+    await client.appendJson({ id: "owned-by-parent" });
+    const response = await client.stream({ live: false });
+    return response.json();
+  });
+}).pipe(Effect.scoped, Effect.provide(FetchHttpClient.layer));
+```
+
+`makeEffectClient` captures ambient HTTP and both schema encoding/decoding services. Its parent Scope must enclose all Promise use; closing the parent cancels children without disposing borrowed services. Advanced options exclude custom fetch and dynamic metadata callbacks: customize ambient HTTP instead. Ordinary constructors never accept an Effect Context, Layer or runtime.
 
 ## Construct, write, and collect JSON
 
@@ -91,7 +167,7 @@ Provide `FetchHttpClient.layer` (or your application HTTP layer) when running th
 
 Each client permits **one read consumption total**, shared by its bytes/text/JSON views—even after completion, failure, or interruption. Make another client for another read. `client.offset` returns `Option<Offset>` and advances only after full response/control-boundary delivery; an early stop can leave the preceding checkpoint, so resumption may replay messages. Text decoding is strict UTF-8. JSON requires an array envelope; empty/malformed/singleton bodies are not silently normalized. NDJSON is bytes/text, not JSON mode.
 
-Read consumption owns response resources and reconnect fibers. Interrupt and join the consuming Effect to cancel; there is no SDK `AbortSignal`, Web Stream, subscription callback, or runtime-disposal method.
+Native read consumption owns response resources and reconnect fibers. Interrupt and join the consuming Effect to cancel; the root does not expose the facade's `AbortSignal`, Web Stream or callback APIs.
 
 ## Tagged recovery and lifecycle
 
@@ -147,7 +223,9 @@ Producer retries are **protocol recovery only** (auto-claim and local sequence-g
 
 ## Scope and verification
 
-No async facade, automatic live-mode selection, fork creation, server-side multi-stream protocol subscriptions, browser visibility policy, or client-managed ETag/304 entity cache is exposed. Protocol subscriptions are unrelated to consuming these payload streams. An uncached 304 is not an empty read.
+Automatic live-mode selection, fork creation, server-side multi-stream protocol subscriptions, browser visibility policy, and client-managed ETag/304 entity caching are not exposed. Protocol subscriptions are unrelated to callback consumption. An uncached 304 is not an empty read. `/client` and internal paths are intentionally not exports.
+
+The packed-consumer harness exercises Node 24.21.0 and Vite+-managed Bun 1.4.0. It also creates a browser-target bundle and, when Chrome is installed (or `CHROME_BIN` is set), executes a headless Fetch/Web Stream cancellation smoke test. This is not a claim of cross-browser coverage or upstream Node 18 support.
 
 ```bash
 vp install
@@ -161,3 +239,5 @@ vp run test:package
 ```
 
 Conformance uses pinned `@durable-streams/client-conformance-tests@0.2.12`: 269 cases, with 10 expected skips (six unsupported auto cases, two unsupported batch-item-count validation cases, two unconditional upstream SSE skips). Skips are not passes. Deterministic Effect tests separately cover resource ownership, service requirements, batching and interruption. See [publishing](https://github.com/humanlayer/effect-durable-streams-client/blob/main/docs/publishing.md) for first publication and subsequent tag-based OIDC releases.
+
+Release versions come from Git tags, not manual package version bumps: source stays private at `0.0.0`, while `v0.1.0-rc.2` publishes a staged `0.1.0-rc.2` tarball to `rc` (`v0.1.0` uses `latest`). For a local publication preview, run `vp run release:publish --version 0.1.0-rc.1 --dry-run`; the same command without `--dry-run` is the owner-only initial publication path. Neither path changes the source manifest or lockfile.

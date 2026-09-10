@@ -6,7 +6,7 @@ import {
   nodeAt,
   setupCallFromCreateMachineCall,
   typedReferenceName,
-} from "./xstate-single-use.ts";
+} from "./xstate-single-use.js";
 
 type Rule = Parameters<RuleTester["run"]>[1];
 

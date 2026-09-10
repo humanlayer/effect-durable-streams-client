@@ -1,6 +1,7 @@
 {
   "name": "@humanlayer/effect-durable-streams-client",
-  "version": "0.1.0-rc.1",
+  "version": "0.0.0",
+  "private": true,
   "description": "Effect-native Durable Streams client with typed streams, schemas, and scoped idempotent producers.",
   "homepage": "https://github.com/humanlayer/effect-durable-streams-client#readme",
   "bugs": {
@@ -21,12 +22,15 @@
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
     },
+    "./async-await": {
+      "types": "./dist/async-await.d.mts",
+      "import": "./dist/async-await.mjs"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public",
-    "registry": "https://registry.npmjs.org/",
-    "tag": "rc"
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "build": "vp pack",
@@ -35,15 +39,14 @@
     "test:integration": "vp test tests/integration",
     "test:package": "vp test tests/package.test.ts",
     "release:tag-info": "bash scripts/release-tag-info.sh",
+    "release:prepare": "bash scripts/release-prepare.sh",
+    "release:publish": "bash scripts/release-publish.sh",
     "test:conformance": "vp exec client-conformance-tests --run ./tests/conformance/run-adapter.sh",
     "check": "vp check && bun run typed",
     "typed": "node --import tsx tools/typed-lint/src/cli.ts check --config typed-lint.config.json",
     "diff:check": "node --import tsx tools/diff-check/src/main.ts --config tools/diff-check/diff-check.config.json",
-    "prepublishOnly": "vp run build",
+    "prepublishOnly": "echo 'Publish with vp run release:publish --version VERSION, not the source placeholder' >&2; exit 1",
     "prepare": "effect-tsgo patch --oxlint"
-  },
-  "dependencies": {
-    "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
     "@durable-streams/client-conformance-tests": "0.2.12",
@@ -54,6 +57,7 @@
     "@oxlint/plugins": "^1.80.0",
     "@types/node": "^26.1.1",
     "bumpp": "^11.1.0",
+    "effect": "4.0.0-rc.112",
     "eslint-plugin-better-tailwindcss": "^4.7.0",
     "fast-glob": "^3.3.3",
     "oxlint": "1.80.0",
@@ -64,6 +68,9 @@
     "typescript-compiler": "npm:typescript@5.9.3",
     "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0",
     "vite-plus": "^0.3.0"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.112"
   },
   "overrides": {
     "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0"

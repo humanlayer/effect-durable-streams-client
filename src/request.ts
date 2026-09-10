@@ -1,10 +1,16 @@
-import { Effect, Predicate, Record, Schema, Stream } from "effect";
+import { Data, Effect, Predicate, Record, Schema, Stream } from "effect";
 import { HttpClientRequest } from "effect/unstable/http";
-import { InvalidDurableStreamsConfigError } from "./errors.ts";
-import type { DurableStreamsConnection } from "./model.ts";
-import { FieldValue } from "./headers.ts";
+import { InvalidDurableStreamsConfigError } from "./errors.js";
+import type { DurableStreamsConnection } from "./model.js";
+import { FieldValue } from "./headers.js";
 
 const RESERVED_PARAMS = new Set(["offset", "live", "cursor"]);
+
+export class RequestMetadataFailure extends Data.TaggedError("RequestMetadataFailure")<{}> {}
+
+export const isRequestMetadataFailure = (failure: { readonly reason: object }) =>
+  Predicate.hasProperty(failure.reason, "cause") &&
+  Predicate.isTagged(failure.reason.cause, "RequestMetadataFailure");
 
 export const checkExtensions = (connection: DurableStreamsConnection) =>
   Effect.gen(function* () {

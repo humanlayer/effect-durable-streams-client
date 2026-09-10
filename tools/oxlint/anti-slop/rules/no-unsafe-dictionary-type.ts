@@ -5,7 +5,7 @@ import {
 	classifyUnsafeDictionaryValue,
 	createTypeEnvironment,
 	type TypeEnvironment,
-} from "../shared/dictionary-types.ts";
+} from "../shared/dictionary-types.js";
 
 import type { ESTree } from "@oxlint/plugins";
 

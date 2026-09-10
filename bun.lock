@@ -3,10 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@humanlayer/template-library",
-      "dependencies": {
-        "effect": "4.0.0-rc.112",
-      },
+      "name": "@humanlayer/effect-durable-streams-client",
       "devDependencies": {
         "@durable-streams/client-conformance-tests": "0.2.12",
         "@durable-streams/server": "0.3.8",
@@ -16,6 +13,7 @@
         "@oxlint/plugins": "^1.80.0",
         "@types/node": "^26.1.1",
         "bumpp": "^11.1.0",
+        "effect": "4.0.0-rc.112",
         "eslint-plugin-better-tailwindcss": "^4.7.0",
         "fast-glob": "^3.3.3",
         "oxlint": "1.80.0",
@@ -26,6 +24,9 @@
         "typescript-compiler": "npm:typescript@5.9.3",
         "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0",
         "vite-plus": "^0.3.0",
+      },
+      "peerDependencies": {
+        "effect": "4.0.0-rc.112",
       },
     },
   },

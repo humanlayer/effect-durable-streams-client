@@ -15,8 +15,8 @@ import {
 } from "effect";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http";
 import { TestClock } from "effect/testing";
-import { DurableStreamsClient, type AppendError } from "../src/index.ts";
-import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.ts";
+import { DurableStreamsClient, type AppendError } from "../src/index.js";
+import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.js";
 
 class SourceFailure extends Data.TaggedError("SourceFailure") {}
 class SourceConfig extends Context.Service<SourceConfig, { readonly chunk: string }>()(

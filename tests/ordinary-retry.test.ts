@@ -19,9 +19,9 @@ import {
   type AppendResult,
   type CloseResult,
   type CloseError,
-} from "../src/index.ts";
-import { makeReadHttp, readReply } from "./support/read-http.ts";
-import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.ts";
+} from "../src/index.js";
+import { makeReadHttp, readReply } from "./support/read-http.js";
+import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.js";
 
 describe("reference ordinary write retries", () => {
   it.effect(

@@ -36,7 +36,7 @@ jobs:
           version: 0.3.0
           run-install: false
           node-manager: false
-      - name: Verify committed version and derive dist-tag
+      - name: Derive release version and dist-tag from Git tag
         id: release
         run: bash scripts/release-tag-info.sh
       - run: vp install --frozen-lockfile
@@ -50,10 +50,10 @@ jobs:
       - name: Ensure build did not rewrite tracked release inputs
         run: git diff --exit-code
       - name: Inspect publication
-        run: npm publish --dry-run --ignore-scripts --access public --tag "$DIST_TAG"
+        run: vp run release:publish --version "$RELEASE_VERSION" --dry-run
         env:
-          DIST_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
       - name: Publish using npm OIDC
-        run: npm publish --ignore-scripts --access public --tag "$DIST_TAG"
+        run: vp run release:publish --version "$RELEASE_VERSION"
         env:
-          DIST_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}

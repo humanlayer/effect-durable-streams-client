@@ -5,8 +5,8 @@ temp=$(mktemp -d)
 trap 'rm -rf "$temp"' EXIT
 
 cd "$temp"
+printf '{"version":"0.0.0","private":true}\n' > package.json
 for version in 0.1.0-rc.1 1.2.3-beta.4 1.2.3; do
-  printf '{"version":"%s"}\n' "$version" > package.json
   output=$(bash "$root/scripts/release-tag-info.sh" "v$version")
   case "$version" in
     *-rc.*) expected=rc ;;
@@ -14,12 +14,16 @@ for version in 0.1.0-rc.1 1.2.3-beta.4 1.2.3; do
     *) expected=latest ;;
   esac
   [[ "$output" == "$(printf 'version=%s\ntag=%s' "$version" "$expected")" ]]
-  if bash "$root/scripts/release-tag-info.sh" v9.9.9; then exit 1; fi
+  [[ "$(bash "$root/scripts/release-tag-info.sh" --version "$version")" == "$output" ]]
+  [[ "$(GITHUB_REF_NAME="v$version" bash "$root/scripts/release-tag-info.sh")" == "$output" ]]
 done
-for version in 01.2.3 1.2.3-rc.01 1.2.3-latest.1 1.2.3-1 1.2.3+build; do
-  printf '{"version":"%s"}\n' "$version" > package.json
+for version in 0.0.0 01.2.3 1.2.3-rc.01 1.2.3-latest.1 1.2.3-1 1.2.3+build; do
   if bash "$root/scripts/release-tag-info.sh" "v$version"; then exit 1; fi
 done
+if bash "$root/scripts/release-tag-info.sh" --version; then exit 1; fi
+if bash "$root/scripts/release-tag-info.sh" --version 1.2.3 --unexpected; then exit 1; fi
+GITHUB_OUTPUT="$temp/output" bash "$root/scripts/release-tag-info.sh" v2.3.4-rc.5
+[[ "$(cat "$temp/output")" == "$(printf 'version=2.3.4-rc.5\ntag=rc')" ]]
 cd "$root"
 
 # Exercise the pinned runner's finally path with a real SDK adapter and a rejected init.

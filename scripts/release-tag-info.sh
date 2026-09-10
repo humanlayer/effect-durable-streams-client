@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The committed package is authoritative; CI never rewrites its version.
-version=$(node -p 'require("./package.json").version')
-ref=${1:-${GITHUB_REF_NAME:-}}
-if [[ "$ref" != "v$version" ]]; then
-  echo "Release tag must equal v$version; received: $ref" >&2
+# Resolve independently of the source manifest, as in Fold.
+if [[ $# == 2 && "$1" == --version ]]; then
+  version=$2
+elif [[ $# -le 1 && "${1:-${GITHUB_REF_NAME:-}}" == v* ]]; then
+  ref=${1:-${GITHUB_REF_NAME:-}}
+  version=${ref#v}
+else
+  echo 'Provide vVERSION, GITHUB_REF_NAME, or --version VERSION' >&2
   exit 1
 fi
 if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([a-z][a-z0-9-]*)\.(0|[1-9][0-9]*))?$ ]]; then
@@ -13,6 +16,10 @@ if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([a-z]
   exit 1
 fi
 tag=${BASH_REMATCH[5]:-latest}
+if [[ "$version" == 0.0.0 ]]; then
+  echo 'The source placeholder 0.0.0 cannot be released' >&2
+  exit 1
+fi
 if [[ "$version" == *-* && "$tag" == latest ]]; then
   echo "Prereleases cannot use the latest dist-tag" >&2
   exit 1

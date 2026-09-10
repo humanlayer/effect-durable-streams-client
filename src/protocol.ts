@@ -9,7 +9,7 @@ import {
   SchemaGetter,
   type SchemaIssue,
 } from "effect";
-import { ContentType, Offset, StreamMetadata } from "./model.ts";
+import { ContentType, Offset, StreamMetadata } from "./model.js";
 
 export const NEXT_OFFSET = "stream-next-offset";
 export const CLOSED = "stream-closed";

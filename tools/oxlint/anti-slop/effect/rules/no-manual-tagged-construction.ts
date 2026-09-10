@@ -4,7 +4,7 @@ import {
 	isMatchPatternObject,
 	isStringLiteral,
 	propertyName,
-} from "../shared/tagged-values.ts";
+} from "../shared/tagged-values.js";
 
 export const noManualTaggedConstructionRule = defineRule({
 	meta: {

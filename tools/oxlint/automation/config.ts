@@ -1,5 +1,5 @@
-import { allRules, profile } from "./profiles.ts";
-import type { RuleProfile } from "./catalog.ts";
+import { allRules, profile } from "./profiles.js";
+import type { RuleProfile } from "./catalog.js";
 
 export interface ConfigOptions {
   readonly namespace?: string;

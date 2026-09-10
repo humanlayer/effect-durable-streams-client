@@ -8,7 +8,7 @@ import {
   type DeleteError,
   type HeadError,
   type ReadError,
-} from "./errors.ts";
+} from "./errors.js";
 import {
   DurableStreamsConnection,
   type DurableStreamsClientConfig,
@@ -22,18 +22,18 @@ import {
   type CloseResult,
   type CreateResult,
   type StreamMetadata,
-} from "./model.ts";
-import { inspectStream } from "./transport.ts";
-import { checkExtensions } from "./request.ts";
-import { closeStream, createStream, deleteStream } from "./lifecycle.ts";
-import { allocateRead } from "./read.ts";
-import { appendSource, allocateOrdinaryAppends } from "./append.ts";
-import { acquireProducer, type IdempotentProducer } from "./producer.ts";
-import type { ProducerOptions } from "./model.ts";
-export type { IdempotentProducer } from "./producer.ts";
+} from "./model.js";
+import { inspectStream } from "./transport.js";
+import { checkExtensions } from "./request.js";
+import { closeStream, createStream, deleteStream } from "./lifecycle.js";
+import { allocateRead } from "./read.js";
+import { appendSource, allocateOrdinaryAppends } from "./append.js";
+import { acquireProducer, type IdempotentProducer } from "./producer.js";
+import type { ProducerOptions } from "./model.js";
+export type { IdempotentProducer } from "./producer.js";
 
-export * from "./model.ts";
-export * from "./errors.ts";
+export * from "./model.js";
+export * from "./errors.js";
 
 export type Client<S extends Schema.Top, A = S["Type"]> = {
   readonly producer: (
@@ -123,6 +123,7 @@ function _make<S extends Schema.Top = typeof Schema.Json>(config: DurableStreams
           Effect.flatMap((connection) =>
             acquireProducer<S>({ connection, schema: config.schema, input }),
           ),
+          Effect.map(({ native }) => native),
         ),
       create: (input: CreateInput<S["Type"] | Uint8Array>) =>
         Ref.get(currentConnection).pipe(
@@ -170,7 +171,10 @@ function _make<S extends Schema.Top = typeof Schema.Json>(config: DurableStreams
           ),
         ),
       ),
-      ...read,
+      bytes: read.bytes,
+      text: read.text,
+      json: read.json,
+      offset: read.offset,
     };
   }).pipe(Effect.withSpan("durable_streams.make"));
   return result;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Exit, Fiber, Match, Queue, Ref } from "effect";
-import { DurableStreamsClient, StreamLifetime } from "../src/index.ts";
-import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.ts";
+import { DurableStreamsClient, StreamLifetime } from "../src/index.js";
+import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.js";
 
 describe("lifecycle requests", () => {
   it.effect("rejects malformed lifetimes and retry settings locally", () =>

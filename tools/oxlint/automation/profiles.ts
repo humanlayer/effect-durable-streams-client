@@ -3,7 +3,7 @@ import {
   rulesByProfile,
   severityByRule,
   type RuleProfile,
-} from "./catalog.ts";
+} from "./catalog.js";
 
 type Severity = "error" | "warn";
 

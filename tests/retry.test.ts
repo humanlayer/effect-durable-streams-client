@@ -13,9 +13,9 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
-import { DurableStreamsClient, DurableStreamsConnection } from "../src/index.ts";
-import { parseRetryAfter, requestRetrySchedule, waitForSseReconnect } from "../src/retry.ts";
-import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.ts";
+import { DurableStreamsClient, DurableStreamsConnection } from "../src/index.js";
+import { parseRetryAfter, requestRetrySchedule, waitForSseReconnect } from "../src/retry.js";
+import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.js";
 
 describe("reference retry policy", () => {
   it.effect("caps SSE full jitter and floors fractional milliseconds", () =>

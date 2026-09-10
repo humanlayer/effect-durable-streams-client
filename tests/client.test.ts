@@ -8,8 +8,8 @@ import {
   type HeadError,
   type ReadError,
   type InvalidDurableStreamsConfigError,
-} from "../src/index.ts";
-import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.ts";
+} from "../src/index.js";
+import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.js";
 
 describe("construction and API types", () => {
   it.effect("makes a cold client without HttpClient and preserves direct schema types", () =>

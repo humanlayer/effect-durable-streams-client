@@ -1,10 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Option, Queue, Random, Schema, Stream } from "effect";
 import { HttpClientError, type HttpClient } from "effect/unstable/http";
-import type { ReadError } from "../src/errors.ts";
+import type { ReadError } from "../src/errors.js";
 import { TestClock } from "effect/testing";
-import { DurableStreamsClient } from "../src/index.ts";
-import { makeReadHttp, readReply, type ReadReply } from "./support/read-http.ts";
+import { DurableStreamsClient } from "../src/index.js";
+import { makeReadHttp, readReply, type ReadReply } from "./support/read-http.js";
 
 const _sse = (wire: string) =>
   ({

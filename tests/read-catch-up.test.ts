@@ -2,9 +2,9 @@ import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Option, Queue, Stream } from "effect";
 import { HttpClient } from "effect/unstable/http";
 import { TestClock } from "effect/testing";
-import { DurableStreamsClient } from "../src/index.ts";
-import { makeReadHttp, readReply } from "./support/read-http.ts";
-import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.ts";
+import { DurableStreamsClient } from "../src/index.js";
+import { makeReadHttp, readReply } from "./support/read-http.js";
+import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.js";
 
 describe("finite catch-up ownership and progression", () => {
   it.effect(

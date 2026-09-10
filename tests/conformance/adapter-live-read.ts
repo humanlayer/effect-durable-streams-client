@@ -11,10 +11,10 @@ import {
 } from "effect";
 import { HttpClient } from "effect/unstable/http";
 import type { TestResult } from "@durable-streams/client-conformance-tests/protocol";
-import { DurableStreamsClient, StreamMetadata } from "../../src/index.ts";
-import { AdapterState } from "./adapter-state.ts";
-import type { AdapterCommand } from "./adapter.ts";
-import { observeSse } from "./adapter-sse.ts";
+import { DurableStreamsClient, StreamMetadata } from "../../src/index.js";
+import { AdapterState } from "./adapter-state.js";
+import type { AdapterCommand } from "./adapter.js";
+import { observeSse } from "./adapter-sse.js";
 
 export const readLive = (input: Extract<AdapterCommand, { readonly type: "read" }>) =>
   Effect.gen(function* () {

@@ -1,7 +1,12 @@
 import { Effect, Match, Option, Predicate, Record, Schema } from "effect";
 import type { HttpClient } from "effect/unstable/http";
-import * as Errors from "./errors.ts";
-import { captureSchemaFailure, encodePayload, encodePayloads } from "./encoding.ts";
+import * as Errors from "./errors.js";
+import {
+  captureSchemaFailure,
+  encodePayload,
+  encodePayloads,
+  type PreparedBody,
+} from "./encoding.js";
 import {
   AppendResult,
   CloseResult,
@@ -12,18 +17,21 @@ import {
   type CloseInput,
   type CreateInput,
   type DurableStreamsConnection,
-} from "./model.ts";
-import { parseHeadMetadata, WriteHeaders } from "./protocol.ts";
+} from "./model.js";
+import { parseHeadMetadata, WriteHeaders } from "./protocol.js";
 import {
   freezeErrorResponse,
   protocolViolation,
   sendMutation,
   type MutationFailure,
-} from "./transport.ts";
-import { FieldValue } from "./headers.ts";
+} from "./transport.js";
+import { FieldValue } from "./headers.js";
 import type { Stream } from "effect";
+import { isRequestMetadataFailure } from "./request.js";
 
 const _commonRejection = (failure: MutationFailure) => {
+  if (failure.cause !== undefined && isRequestMetadataFailure(failure.cause))
+    return Effect.fail(new Errors.ProtocolViolationError({ component: "request metadata" }));
   const response = failure.response;
   if (response === undefined) return Effect.fail(new Errors.StreamUnavailableError({}));
   return Match.value(response.status).pipe(
@@ -55,7 +63,10 @@ export type LifecycleContext<S extends Schema.Top> = {
 };
 
 export const createStream = <S extends Schema.Top>(
-  context: LifecycleContext<S> & { readonly input: CreateInput<S["Type"] | Uint8Array> },
+  context: LifecycleContext<S> & {
+    readonly input: CreateInput<S["Type"] | Uint8Array>;
+    readonly prepared?: PreparedBody;
+  },
 ): Effect.Effect<CreateResult, Errors.CreateError, HttpClient.HttpClient | S["EncodingServices"]> =>
   Effect.gen(function* () {
     const input = context.input;
@@ -63,6 +74,7 @@ export const createStream = <S extends Schema.Top>(
       return yield* new Errors.PayloadEncodeError({ component: "create payload exclusivity" });
     const options = yield* Schema.decodeEffect(CreateOptions)(input);
     const contentType =
+      context.prepared?.contentType ??
       options.contentType ??
       context.connection.contentType ??
       (context.schema === undefined ? "application/octet-stream" : "application/json");
@@ -85,16 +97,24 @@ export const createStream = <S extends Schema.Top>(
     if (options.lifetime !== undefined && StreamLifetime.guards.ExpiresAt(options.lifetime)) {
       yield* Schema.decodeEffect(Schema.DateTimeUtcFromString)(options.lifetime.expiresAt);
     }
-    const body = Predicate.hasProperty(input, "values")
-      ? yield* encodePayloads({
-          ...context,
-          values: yield* Schema.decodeEffect(Schema.Array(Schema.Unknown))(input.values),
-          contentType,
-          operation: "create",
-        })
-      : Predicate.hasProperty(input, "value")
-        ? yield* encodePayload({ ...context, value: input.value, contentType, operation: "create" })
-        : undefined;
+    const body =
+      context.prepared !== undefined
+        ? context.prepared.body
+        : Predicate.hasProperty(input, "values")
+          ? yield* encodePayloads({
+              ...context,
+              values: yield* Schema.decodeEffect(Schema.Array(Schema.Unknown))(input.values),
+              contentType,
+              operation: "create",
+            })
+          : Predicate.hasProperty(input, "value")
+            ? yield* encodePayload({
+                ...context,
+                value: input.value,
+                contentType,
+                operation: "create",
+              })
+            : undefined;
     const response = yield* sendMutation({
       connection: context.connection,
       operation: "create",
@@ -312,7 +332,10 @@ export const appendStreamValue = <S extends Schema.Top>(
   );
 
 export const closeStream = <S extends Schema.Top>(
-  context: LifecycleContext<S> & { readonly input: CloseInput<S["Type"] | Uint8Array> },
+  context: LifecycleContext<S> & {
+    readonly input: CloseInput<S["Type"] | Uint8Array>;
+    readonly prepared?: WriteRequest<S>["prepared"];
+  },
 ): Effect.Effect<CloseResult, Errors.CloseError, HttpClient.HttpClient | S["EncodingServices"]> =>
   _write({ ...context, operation: "close" }).pipe(
     Effect.map((result) => CloseResult.make({ finalOffset: result.offset })),

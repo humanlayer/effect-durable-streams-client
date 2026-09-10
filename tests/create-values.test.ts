@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "@effect/vitest";
 import { Array, Effect, Match, Queue, Schema, SchemaGetter } from "effect";
-import { DurableStreamsClient, type CreateInput } from "../src/index.ts";
-import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.ts";
+import { DurableStreamsClient, type CreateInput } from "../src/index.js";
+import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.js";
 
 describe("atomic initial values", () => {
   it.effect("frames raw JSON once and distinguishes empty messages from no messages", () =>

@@ -52,13 +52,14 @@ describe("Phase 2 review regressions", () => {
   );
 
   it.effect(
-    "keeps absent create/close values bodyless but never retries a present undefined final value",
+    "keeps absent values bodyless and classifies a present undefined final value after exhaustion",
     () =>
       Effect.gen(function* () {
         const http = yield* makeScriptedHttpClient;
         const client = yield* DurableStreamsClient.make({
           url: "https://streams.test/orders",
           schema: UndefinedFromNull,
+          backoffOptions: { maxRetries: 0 },
         });
         yield* http.respond(
           ScriptedResponse.Response({

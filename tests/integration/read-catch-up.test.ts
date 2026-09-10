@@ -92,7 +92,7 @@ describe("reference server finite catch-up", () => {
       }).pipe(Effect.provide(FetchHttpClient.layer)),
   );
 
-  it.effect("runs finite adapter commands over the real SDK without advertising live reads", () =>
+  it.effect("runs finite adapter commands over the real SDK independently of SSE", () =>
     Effect.gen(function* () {
       const { baseUrl } = yield* acquireDurableStreamServer;
       yield* handleCommand({ type: "init", serverUrl: baseUrl });
@@ -118,8 +118,13 @@ describe("reference server finite catch-up", () => {
         yield* handleCommand({ type: "read", path: "/adapter", offset: "now", live: false }),
       ).toMatchObject({ type: "read", chunks: [] });
       expect(
-        yield* handleCommand({ type: "read", path: "/adapter", live: "long-poll" }),
-      ).toMatchObject({ type: "error", errorCode: "NOT_SUPPORTED" });
+        yield* handleCommand({
+          type: "read",
+          path: "/adapter",
+          live: "sse",
+          waitForUpToDate: true,
+        }),
+      ).toMatchObject({ type: "read", chunks: [{ data: "[1,[2,3]]" }] });
       expect(yield* handleCommand({ type: "read", path: "/missing", live: false })).toMatchObject({
         type: "error",
         errorCode: "NOT_FOUND",

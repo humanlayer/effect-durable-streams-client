@@ -26,7 +26,7 @@ export const makeReadHttp = Effect.gen(function* () {
         request,
         new Response(null, { status: reply.status, headers: reply.headers }),
       );
-      Object.defineProperty(response, "stream", { get: () => reply.body });
+      Object.defineProperty(response, "stream", { configurable: true, get: () => reply.body });
       return response;
     }),
   );

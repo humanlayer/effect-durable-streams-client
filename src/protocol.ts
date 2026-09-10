@@ -6,6 +6,7 @@ import {
   Predicate,
   Record,
   Schema,
+  SchemaGetter,
   type SchemaIssue,
 } from "effect";
 import { ContentType, Offset, StreamMetadata } from "./model.ts";
@@ -20,6 +21,23 @@ export const WriteHeaders = Schema.Struct({
   "stream-closed": Schema.optionalKey(Schema.Literals(["true", "false"])),
 });
 
+export const ProducerNumber = Schema.String.check(Schema.isPattern(/^(0|[1-9]\d*)$/)).pipe(
+  Schema.decodeTo(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)), {
+    decode: SchemaGetter.transform(Number),
+    encode: SchemaGetter.transform(String),
+  }),
+);
+export const ProducerSuccessHeaders = Schema.Struct({
+  "producer-epoch": ProducerNumber,
+  "producer-seq": ProducerNumber,
+  "stream-next-offset": Schema.optionalKey(WriteHeaders.fields["stream-next-offset"]),
+  "stream-closed": WriteHeaders.fields["stream-closed"],
+});
+export const ProducerGapHeaders = Schema.Struct({
+  "producer-expected-seq": ProducerNumber,
+  "producer-received-seq": ProducerNumber,
+});
+
 export const ReadHeaders = Schema.Struct({
   ...WriteHeaders.fields,
   "content-type": ContentType,
@@ -28,6 +46,35 @@ export const ReadHeaders = Schema.Struct({
   etag: Schema.optionalKey(Schema.String),
   "cache-control": Schema.optionalKey(Schema.String),
 });
+
+export const LongPollEmptyHeaders = Schema.Struct({
+  ...WriteHeaders.fields,
+  "content-type": Schema.optionalKey(ContentType),
+  "stream-up-to-date": Schema.Literal("true"),
+  "stream-cursor": Schema.optionalKey(Schema.NonEmptyString),
+}).check(
+  Schema.makeFilter(
+    (headers) => headers["stream-closed"] === "true" || headers["stream-cursor"] !== undefined,
+  ),
+);
+
+export const LongPollHeaders = ReadHeaders.check(
+  Schema.makeFilter(
+    (headers) => headers["stream-closed"] === "true" || headers["stream-cursor"] !== undefined,
+  ),
+);
+
+export const SseControl = Schema.Struct({
+  streamNextOffset: WriteHeaders.fields["stream-next-offset"],
+  streamCursor: Schema.optionalKey(Schema.NonEmptyString),
+  upToDate: Schema.optionalKey(Schema.Boolean),
+  streamClosed: Schema.optionalKey(Schema.Boolean),
+}).check(
+  Schema.makeFilter(
+    (control) => control.streamClosed === true || control.streamCursor !== undefined,
+  ),
+);
+export type SseControl = typeof SseControl.Type;
 
 export class HeadMetadataFailure extends Data.TaggedError("HeadMetadataFailure")<{
   readonly component: string;

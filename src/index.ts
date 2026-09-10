@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option, Ref, Schema, Stream, Match } from "effect";
+import { Context, Effect, Layer, Option, Ref, Schema, Stream, Match, type Scope } from "effect";
 import type { HttpClient } from "effect/unstable/http";
 import {
   InvalidDurableStreamsConfigError,
@@ -28,11 +28,21 @@ import { checkExtensions } from "./request.ts";
 import { closeStream, createStream, deleteStream } from "./lifecycle.ts";
 import { allocateRead } from "./read.ts";
 import { appendSource, allocateOrdinaryAppends } from "./append.ts";
+import { acquireProducer, type IdempotentProducer } from "./producer.ts";
+import type { ProducerOptions } from "./model.ts";
+export type { IdempotentProducer } from "./producer.ts";
 
 export * from "./model.ts";
 export * from "./errors.ts";
 
 export type Client<S extends Schema.Top, A = S["Type"]> = {
+  readonly producer: (
+    input: ProducerOptions,
+  ) => Effect.Effect<
+    IdempotentProducer<A, S["EncodingServices"]>,
+    InvalidDurableStreamsConfigError,
+    HttpClient.HttpClient | Scope.Scope
+  >;
   readonly head: Effect.Effect<StreamMetadata, HeadError, HttpClient.HttpClient>;
   readonly connect: Effect.Effect<StreamMetadata, HeadError, HttpClient.HttpClient>;
   readonly create: (
@@ -64,7 +74,10 @@ function _make<S extends Schema.Top>(
   config: DurableStreamsClientConfig<S>,
 ): Effect.Effect<Client<S>, InvalidDurableStreamsConfigError>;
 function _make<S extends Schema.Top = typeof Schema.Json>(config: DurableStreamsClientConfig<S>) {
-  return Effect.gen(function* () {
+  const result: Effect.Effect<
+    Client<S> | Client<typeof Schema.Json, Schema.Json | Uint8Array>,
+    InvalidDurableStreamsConfigError
+  > = Effect.gen(function* () {
     const connection = yield* Schema.decodeEffect(DurableStreamsConnection)(config).pipe(
       Effect.mapError(
         () =>
@@ -105,6 +118,12 @@ function _make<S extends Schema.Top = typeof Schema.Json>(config: DurableStreams
     const currentConnection = yield* Ref.make(connection);
     const append = yield* allocateOrdinaryAppends;
     return {
+      producer: (input: ProducerOptions) =>
+        Ref.get(currentConnection).pipe(
+          Effect.flatMap((connection) =>
+            acquireProducer<S>({ connection, schema: config.schema, input }),
+          ),
+        ),
       create: (input: CreateInput<S["Type"] | Uint8Array>) =>
         Ref.get(currentConnection).pipe(
           Effect.flatMap((connection) =>
@@ -154,6 +173,7 @@ function _make<S extends Schema.Top = typeof Schema.Json>(config: DurableStreams
       ...read,
     };
   }).pipe(Effect.withSpan("durable_streams.make"));
+  return result;
 }
 
 const LayerSchemaPolicy = Schema.Struct({ schema: Schema.optionalKey(Schema.Never) });

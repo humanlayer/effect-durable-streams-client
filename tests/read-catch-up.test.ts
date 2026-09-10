@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Cause, Deferred, Effect, Exit, Fiber, Option, Queue, Stream } from "effect";
+import { Deferred, Effect, Fiber, Option, Queue, Stream } from "effect";
 import { HttpClient } from "effect/unstable/http";
 import { TestClock } from "effect/testing";
 import { DurableStreamsClient } from "../src/index.ts";
@@ -228,19 +228,18 @@ describe("finite catch-up ownership and progression", () => {
     }),
   );
 
-  it.effect("rejects explicit live modes honestly without issuing finite GETs", () =>
+  it.effect("SSE configuration stays cold and closed catch-up never enters SSE", () =>
     Effect.gen(function* () {
       const http = yield* makeReadHttp;
-      for (const live of ["long-poll", "sse"] as const) {
+      for (const live of ["sse"] as const) {
         const client = yield* DurableStreamsClient.make({ url: "https://streams.test/data", live });
-        const exit = yield* client.bytes.pipe(
-          Stream.runDrain,
-          Effect.exit,
-          Effect.provide(http.layer),
+        expect(yield* Queue.size(http.requests)).toBe(0);
+        yield* Queue.offer(http.replies, readReply({ offset: "final", text: "", closed: true }));
+        yield* client.bytes.pipe(Stream.runDrain, Effect.provide(http.layer));
+        expect((yield* Queue.take(http.requests)).request.url).toBe(
+          "https://streams.test/data?offset=-1",
         );
-        expect(Exit.hasDies(exit)).toBe(true);
-        if (Exit.isFailure(exit))
-          expect(Cause.pretty(exit.cause)).toContain("live reads are not implemented");
+        expect(yield* client.offset).toEqual(Option.some("final"));
       }
       expect(yield* Queue.size(http.requests)).toBe(0);
     }),

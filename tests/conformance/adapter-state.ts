@@ -1,4 +1,5 @@
-import { Clock, Context, Data, Effect, Match, Option, Ref, Schema } from "effect";
+import { Clock, Context, Data, Effect, Exit, Match, Option, Ref, Schema, Scope } from "effect";
+import type { IdempotentProducer } from "../../src/index.ts";
 import { HttpClientRequest } from "effect/unstable/http";
 
 export class AdapterNotInitialized extends Data.TaggedError("AdapterNotInitialized") {}
@@ -12,6 +13,14 @@ export type DynamicValue = typeof DynamicValue.Type;
 
 export class AdapterState extends Context.Service<AdapterState>()("conformance/AdapterState", {
   make: Effect.gen(function* () {
+    const producerScope = yield* Effect.scope;
+    const producers = new Map<
+      string,
+      {
+        readonly scope: Scope.Closeable;
+        readonly producer: IdempotentProducer<Schema.Json | Uint8Array>;
+      }
+    >();
     const server = yield* Ref.make<Option.Option<URL>>(Option.none());
     const headers = new Map<string, DynamicValue & { counter: number }>();
     const params = new Map<string, DynamicValue & { counter: number }>();
@@ -21,6 +30,8 @@ export class AdapterState extends Context.Service<AdapterState>()("conformance/A
       readonly paramsSent: Readonly<Record<string, string>>;
     }>({ headersSent: {}, paramsSent: {} });
     return {
+      producers,
+      producerScope,
       contentType: (input: { readonly path: string }) =>
         Effect.sync(() => contentTypes.get(input.path)),
       remember: (input: { readonly path: string; readonly contentType: string }) =>
@@ -71,7 +82,13 @@ export class AdapterState extends Context.Service<AdapterState>()("conformance/A
       initialize: (input: { readonly serverUrl: string }) =>
         Schema.decodeEffect(Schema.URLFromString)(input.serverUrl).pipe(
           Effect.tap(() =>
+            Effect.forEach(producers.values(), (entry) => Scope.close(entry.scope, Exit.void), {
+              discard: true,
+            }),
+          ),
+          Effect.tap(() =>
             Effect.sync(() => {
+              producers.clear();
               headers.clear();
               params.clear();
               contentTypes.clear();

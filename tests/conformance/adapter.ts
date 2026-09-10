@@ -20,6 +20,13 @@ import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import type { TestResult } from "@durable-streams/client-conformance-tests/protocol";
 import { DurableStreamsClient, StreamLifetime, StreamMetadata } from "../../src/index.ts";
 import { AdapterState } from "./adapter-state.ts";
+import { readLive } from "./adapter-live-read.ts";
+import {
+  ProducerCommand,
+  ValidateCommand,
+  handleProducer,
+  validateOptions,
+} from "./adapter-producer.ts";
 
 export class AdapterInputError extends Data.TaggedError("AdapterInputError")<{
   readonly cause: unknown;
@@ -28,6 +35,8 @@ export class AdapterInputError extends Data.TaggedError("AdapterInputError")<{
 class AdapterReadTimeout extends Data.TaggedError("AdapterReadTimeout") {}
 
 export const AdapterCommand = Schema.Union([
+  ...ProducerCommand.members,
+  ValidateCommand,
   Schema.Struct({ type: Schema.Literal("init"), serverUrl: Schema.String }),
   Schema.Struct({
     type: Schema.Literal("read"),
@@ -115,24 +124,30 @@ export const handleCommand = (command: AdapterCommand) =>
                 clientVersion: "0.0.0",
                 features: {
                   batching: true,
-                  sse: false,
-                  longPoll: false,
+                  sse: true,
+                  longPoll: true,
                   auto: false,
-                  streaming: false,
+                  streaming: true,
                   dynamicHeaders: true,
-                  retryOptions: false,
+                  retryOptions: true,
                   batchItems: false,
-                  strictZeroValidation: false,
+                  strictZeroValidation: true,
                 },
               }) satisfies TestResult,
           ),
         ),
       shutdown: () => Effect.succeed({ type: "shutdown", success: true } satisfies TestResult),
+      "idempotent-append": handleProducer,
+      "idempotent-append-batch": handleProducer,
+      "idempotent-close": handleProducer,
+      "idempotent-detach": handleProducer,
+      validate: validateOptions,
       head: (input) => _inspect(input),
       connect: (input) => _inspect(input),
       read: (input) =>
         Effect.gen(function* () {
-          if (input.live !== undefined && input.live !== false)
+          if (input.live === "long-poll" || input.live === "sse") return yield* readLive(input);
+          if (input.live !== undefined && input.live)
             return yield* _commandError({ command, errorCode: "NOT_SUPPORTED" });
           const acquired = yield* Deferred.make<void>();
           const streamClosed = yield* Ref.make(false);
@@ -274,6 +289,11 @@ export const handleCommand = (command: AdapterCommand) =>
     });
   }).pipe(
     Effect.catchTags({
+      ProducerClosedError: () => _commandError({ command, errorCode: "ALREADY_CLOSED" }),
+      ProducerFencedError: (error) =>
+        _commandError({ command, errorCode: "STALE_EPOCH", status: error.response.status }),
+      ProducerSequenceGapError: (error) =>
+        _commandError({ command, errorCode: "SEQUENCE_GAP", status: error.response.status }),
       InvalidDurableStreamsConfigError: () =>
         _commandError({ command, errorCode: "INVALID_ARGUMENT" }),
       PayloadEncodeError: () => _commandError({ command, errorCode: "INVALID_ARGUMENT" }),
@@ -288,7 +308,14 @@ export const handleCommand = (command: AdapterCommand) =>
       StreamNotFoundError: (error) =>
         _commandError({ command, errorCode: "NOT_FOUND", status: error.response.status }),
       InvalidRequestError: (error) =>
-        _commandError({ command, errorCode: "INVALID_ARGUMENT", status: error.response.status }),
+        _commandError({
+          command,
+          errorCode:
+            command.type === "read" && command.offset !== undefined
+              ? "INVALID_OFFSET"
+              : "INVALID_ARGUMENT",
+          status: error.response.status,
+        }),
       PayloadTooLargeError: (error) =>
         _commandError({ command, errorCode: "PAYLOAD_TOO_LARGE", status: error.response.status }),
       OperationNotSupportedError: (error) =>
@@ -344,7 +371,18 @@ const _commandError = (input: {
     success: false,
     commandType: input.command.type,
     errorCode: input.errorCode,
-    message: input.errorCode,
+    message: Match.value(input.command).pipe(
+      Match.when({ type: "read" }, (command) => `${input.errorCode}: ${command.path}`),
+      Match.when({ type: "append" }, (command) => `${input.errorCode}: ${command.path}`),
+      Match.when(
+        { type: "validate" },
+        (command) =>
+          `${input.errorCode}: invalid ${Object.keys(command.target)
+            .filter((key) => key !== "target")
+            .join(", ")}`,
+      ),
+      Match.orElse(() => input.errorCode),
+    ),
     ...Record.filter({ status: input.status }, Predicate.isNotUndefined),
   });
 
@@ -461,7 +499,7 @@ const _mutate = (
         delete: () =>
           client.delete.pipe(
             Effect.tap(() => state.forget(command)),
-            Effect.as({ type: "delete", success: true, status: 204 } satisfies TestResult),
+            Effect.as({ type: "delete", success: true, status: 200 } satisfies TestResult),
           ),
       }),
     );
@@ -488,7 +526,7 @@ const _inspect = (command: Extract<AdapterCommand, { readonly type: "head" | "co
             commandType: command.type,
             status: 404,
             errorCode: "NOT_FOUND",
-            message: "Stream not found",
+            message: `Stream not found: ${command.path}`,
           }) satisfies TestResult,
         Existing: (value) =>
           ({
@@ -591,7 +629,7 @@ const _processLine = (line: string) =>
     Effect.flatMap((result) =>
       Schema.encodeEffect(Schema.fromJsonString(Schema.Json))(result).pipe(
         Effect.map((encoded) => ({
-          result: encoded,
+          result: encoded.replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029"),
           shutdown: result.type === "shutdown" && result.success,
         })),
       ),

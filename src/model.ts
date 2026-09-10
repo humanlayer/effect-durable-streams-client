@@ -1,4 +1,4 @@
-import { DateTime, Option, Schema, type Stream } from "effect";
+import { DateTime, Duration, Option, Schema, type Stream } from "effect";
 import { FieldValue } from "./headers.ts";
 
 export const Offset = Schema.NonEmptyString.check(Schema.isPattern(/^[^\s,&=?/]+$/));
@@ -18,6 +18,17 @@ export const DurableStreamsConnection = Schema.Struct({
   live: Schema.optionalKey(LiveMode),
   contentType: Schema.optionalKey(ContentType),
   batching: Schema.optionalKey(Schema.Boolean),
+  sseResilience: Schema.optionalKey(
+    Schema.Struct({
+      minConnectionDuration: Schema.optionalKey(
+        Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+      ),
+      maxShortConnections: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
+      backoffBaseDelay: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
+      backoffMaxDelay: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
+      logWarnings: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
   headers: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   params: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   backoffOptions: Schema.optionalKey(
@@ -32,7 +43,9 @@ export const DurableStreamsConnection = Schema.Struct({
           Schema.Number.check(Schema.makeFilter((value) => value === Infinity)),
         ]),
       ),
-    }),
+    }).check(
+      Schema.makeFilter((options) => (options.maxDelay ?? 60000) >= (options.initialDelay ?? 100)),
+    ),
   ),
 });
 export type DurableStreamsConnection = typeof DurableStreamsConnection.Type;
@@ -108,3 +121,27 @@ export const CreateResult = Schema.Struct({
   closed: Schema.Boolean,
 });
 export type CreateResult = typeof CreateResult.Type;
+
+export const ProducerOptions = Schema.Struct({
+  producerId: FieldValue.check(Schema.isMinLength(1)),
+  epoch: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  autoClaim: Schema.optionalKey(Schema.Boolean),
+  maxBatchBytes: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
+  linger: Schema.optionalKey(
+    Schema.Duration.check(
+      Schema.makeFilter(
+        (value) => Number.isFinite(Duration.toMillis(value)) && Duration.toMillis(value) >= 0,
+      ),
+    ),
+  ),
+  maxInFlight: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
+});
+export type ProducerOptions = typeof ProducerOptions.Type;
+export type ProducerAppendInput<A> = { readonly value: A };
+export type ProducerCloseInput<A> = { readonly value?: A };
+export const ProducerAppendResult = Schema.Struct({
+  offset: Schema.optionalKey(Offset),
+  duplicate: Schema.Boolean,
+  producerSeq: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type ProducerAppendResult = typeof ProducerAppendResult.Type;

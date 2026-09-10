@@ -128,7 +128,7 @@ describe("Phase 1 conformance adapter", () => {
       expect(results[0]).toMatchObject({
         type: "init",
         success: true,
-        features: { batching: true, streaming: false, sse: false, longPoll: false },
+        features: { batching: true, streaming: true, sse: true, longPoll: true },
       });
       expect(results[1]).toMatchObject({
         type: "error",

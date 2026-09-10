@@ -57,14 +57,14 @@ describe("Phase 2 conformance adapter", () => {
           expect(init).toMatchObject({
             features: {
               dynamicHeaders: true,
-              retryOptions: false,
+              retryOptions: true,
               batching: true,
-              sse: false,
-              longPoll: false,
-              streaming: false,
+              sse: true,
+              longPoll: true,
+              streaming: true,
               auto: false,
               batchItems: false,
-              strictZeroValidation: false,
+              strictZeroValidation: true,
             },
           });
           yield* http.respond(
@@ -133,7 +133,7 @@ describe("Phase 2 conformance adapter", () => {
           expect(yield* handleCommand({ type: "delete", path: "/orders" })).toEqual({
             type: "delete",
             success: true,
-            status: 204,
+            status: 200,
           });
           expect((yield* Queue.take(http.requests)).method).toBe("DELETE");
         }).pipe(

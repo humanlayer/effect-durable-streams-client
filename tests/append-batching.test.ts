@@ -15,6 +15,7 @@ import {
   SchemaGetter,
 } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { TestClock } from "effect/testing";
 import { DurableStreamsClient } from "../src/index.ts";
 import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.ts";
 
@@ -253,6 +254,15 @@ describe("reference ordinary batching", () => {
           expect(next.headers["stream-seq"]).toBe("04");
           const e = yield* client.append({ value: "later" }).pipe(Effect.forkChild);
           yield* Queue.take(http.admissions);
+          yield* http.respond(
+            ScriptedResponse.Response({ status: 503, headers: { "retry-after": "2" } }),
+          );
+          yield* TestClock.adjust("2 seconds");
+          const retry = yield* Queue.take(http.requests);
+          expect(_body(retry)).toEqual(_body(next));
+          expect(retry.headers["stream-seq"]).toBe("04");
+          expect(yield* Ref.get(http.active)).toBe(1);
+          expect(yield* Queue.size(http.requests)).toBe(0);
           yield* http.accept("second");
           for (const fiber of [b, c, d])
             expect(yield* Fiber.join(fiber)).toEqual({ offset: "second", closed: false });
@@ -366,37 +376,75 @@ describe("reference ordinary batching", () => {
     }),
   );
 
-  it.effect(
-    "interrupts a shared request from any participant and fails peers and the next buffer",
-    () =>
-      Effect.gen(function* () {
-        const http = yield* setup;
-        yield* Effect.gen(function* () {
-          const client = yield* DurableStreamsClient.make({ url: "https://streams.test/bytes" });
-          const a = yield* client.append({ value: "a" }).pipe(Effect.forkChild);
-          yield* Queue.take(http.admissions);
-          yield* Queue.take(http.requests);
-          const b = yield* client.append({ value: "b" }).pipe(Effect.forkChild);
-          yield* Queue.take(http.admissions);
-          const c = yield* client.append({ value: "c" }).pipe(Effect.flip, Effect.forkChild);
-          yield* Queue.take(http.admissions);
-          yield* http.accept("a");
-          yield* Fiber.join(a);
-          yield* Queue.take(http.requests);
-          const d = yield* client.append({ value: "d" }).pipe(Effect.flip, Effect.forkChild);
-          yield* Queue.take(http.admissions);
-          yield* Fiber.interrupt(b);
-          expect(Exit.hasInterrupts(yield* Fiber.await(b))).toBe(true);
-          const error = yield* Fiber.join(c);
-          expect(error).toHaveProperty("_tag", "AppendOutcomeUnknownError");
-          expect(yield* Fiber.join(d)).toBe(error);
-          expect(yield* Ref.get(http.active)).toBe(0);
-          expect(yield* Queue.size(http.requests)).toBe(0);
-          yield* http.accept("recovered");
-          yield* client.append({ value: "new" });
-        }).pipe(Effect.provide(http.layer));
-      }),
+  it.effect("exhausted retries fail the active and buffered callers once, then recover", () =>
+    Effect.gen(function* () {
+      const http = yield* setup;
+      yield* Effect.gen(function* () {
+        const client = yield* DurableStreamsClient.make({
+          url: "https://streams.test/bytes",
+          backoffOptions: { maxRetries: 1 },
+        });
+        const a = yield* client.append({ value: "a" }).pipe(Effect.flip, Effect.forkChild);
+        yield* Queue.take(http.admissions);
+        const first = yield* Queue.take(http.requests);
+        const b = yield* client.append({ value: "b" }).pipe(Effect.flip, Effect.forkChild);
+        yield* Queue.take(http.admissions);
+        yield* http.respond(ScriptedResponse.TransportFailure());
+        yield* TestClock.adjust("100 millis");
+        expect(_body(yield* Queue.take(http.requests))).toEqual(_body(first));
+        yield* http.respond(ScriptedResponse.Response({ status: 503, headers: {} }));
+        const error = yield* Fiber.join(a);
+        expect(error).toHaveProperty("_tag", "AppendOutcomeUnknownError");
+        expect(yield* Fiber.join(b)).toBe(error);
+        expect(yield* Queue.size(http.requests)).toBe(0);
+        yield* http.accept("recovered");
+        expect(yield* client.append({ value: "c" })).toHaveProperty("offset", "recovered");
+        yield* Queue.take(http.requests);
+        expect(yield* Ref.get(http.active)).toBe(0);
+      }).pipe(Effect.provide(http.layer));
+    }),
   );
+
+  for (const duringBackoff of [false, true]) {
+    it.effect(
+      `interrupts shared work from any participant and fails peers and buffer, backoff=${duringBackoff}`,
+      () =>
+        Effect.gen(function* () {
+          const http = yield* setup;
+          yield* Effect.gen(function* () {
+            const client = yield* DurableStreamsClient.make({ url: "https://streams.test/bytes" });
+            const a = yield* client.append({ value: "a" }).pipe(Effect.forkChild);
+            yield* Queue.take(http.admissions);
+            yield* Queue.take(http.requests);
+            const b = yield* client.append({ value: "b" }).pipe(Effect.forkChild);
+            yield* Queue.take(http.admissions);
+            const c = yield* client.append({ value: "c" }).pipe(Effect.flip, Effect.forkChild);
+            yield* Queue.take(http.admissions);
+            yield* http.accept("a");
+            yield* Fiber.join(a);
+            yield* Queue.take(http.requests);
+            const d = yield* client.append({ value: "d" }).pipe(Effect.flip, Effect.forkChild);
+            yield* Queue.take(http.admissions);
+            if (duringBackoff) {
+              yield* http.respond(
+                ScriptedResponse.Response({ status: 503, headers: { "retry-after": "60" } }),
+              );
+              yield* TestClock.adjust("1 millis");
+            }
+            yield* Fiber.interrupt(b);
+            expect(Exit.hasInterrupts(yield* Fiber.await(b))).toBe(true);
+            const error = yield* Fiber.join(c);
+            expect(error).toHaveProperty("_tag", "AppendOutcomeUnknownError");
+            expect(yield* Fiber.join(d)).toBe(error);
+            expect(yield* Ref.get(http.active)).toBe(0);
+            yield* TestClock.adjust("1 hour");
+            expect(yield* Queue.size(http.requests)).toBe(0);
+            yield* http.accept("recovered");
+            yield* client.append({ value: "new" });
+          }).pipe(Effect.provide(http.layer));
+        }),
+    );
+  }
 
   it.effect("disabled batching permits independent in-flight requests", () =>
     Effect.gen(function* () {

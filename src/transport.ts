@@ -237,6 +237,7 @@ export const freezeErrorResponse = (error: { readonly response?: ErrorResponse }
   Effect.sync(() => {
     const response = error.response;
     if (response === undefined) return;
+    if (Object.isFrozen(response)) return;
     if (ErrorResponseBody.guards.Bytes(response.body)) {
       const captured = response.body.value.slice();
       Object.defineProperty(response.body, "value", {
@@ -251,63 +252,79 @@ export const freezeErrorResponse = (error: { readonly response?: ErrorResponse }
 
 export type MutationRequest = RequestInput & {
   readonly operation: "create" | "append" | "close" | "delete";
-  readonly safe: boolean;
+  readonly producer?: boolean;
 };
 
 export const sendMutation = (input: MutationRequest) => {
   const url = input.connection.url.origin + input.connection.url.pathname;
-  return Effect.gen(function* () {
-    const parentScope = yield* Effect.scope;
-    const attemptScope = yield* Scope.fork(parentScope);
-    return yield* Effect.gen(function* () {
-      const http = yield* HttpClient.HttpClient;
-      const response = yield* HttpClient.withScope(http)
-        .execute(buildRequest(input))
-        .pipe(
-          Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
-          Effect.catchReason("HttpClientError", "StatusCodeError", (reason) =>
-            Effect.succeed(reason.response),
+  return Effect.suspend(() => {
+    const bodyState = { consumed: false };
+    const source = input.bodyStream;
+    const request =
+      source === undefined
+        ? input
+        : {
+            ...input,
+            bodyStream: Stream.suspend(() => {
+              if (bodyState.consumed) return Stream.fail(new MutationFailure({ retryable: false }));
+              bodyState.consumed = true;
+              return source;
+            }),
+          };
+    return Effect.gen(function* () {
+      const parentScope = yield* Effect.scope;
+      const attemptScope = yield* Scope.fork(parentScope);
+      return yield* Effect.gen(function* () {
+        const http = yield* HttpClient.HttpClient;
+        const response = yield* HttpClient.withScope(http)
+          .execute(buildRequest(request))
+          .pipe(
+            Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
+            Effect.catchReason("HttpClientError", "StatusCodeError", (reason) =>
+              Effect.succeed(reason.response),
+            ),
+            Effect.mapError((cause) => new MutationFailure({ cause, retryable: true })),
+          );
+        if (response.status >= 200 && response.status < 300) return response;
+        const snapshot = yield* _snapshotResponse({ response, url, operation: input.operation });
+        const retryAfter = yield* parseRetryAfter(response.headers["retry-after"]);
+        return yield* new MutationFailure({
+          response: snapshot,
+          ...Record.filter(
+            { retryAfter: Option.getOrUndefined(retryAfter) },
+            Predicate.isNotUndefined,
           ),
-          Effect.mapError((cause) => new MutationFailure({ cause, retryable: true })),
-        );
-      if (response.status >= 200 && response.status < 300) return response;
-      const snapshot = yield* _snapshotResponse({ response, url, operation: input.operation });
-      const retryAfter = yield* parseRetryAfter(response.headers["retry-after"]);
-      return yield* new MutationFailure({
-        response: snapshot,
-        ...Record.filter(
-          { retryAfter: Option.getOrUndefined(retryAfter) },
-          Predicate.isNotUndefined,
+          retryable: response.status === 429 || response.status >= 500 || response.status < 400,
+        });
+      }).pipe(
+        Effect.provideService(Scope.Scope, attemptScope),
+        Effect.onExit((exit) =>
+          Exit.isFailure(exit) ? Scope.close(attemptScope, exit) : Effect.void,
         ),
-        retryable:
-          (response.status === 429 || response.status >= 500 || response.status < 400) &&
-          !(response.status === 501 && input.operation !== "create"),
-      });
+      );
     }).pipe(
-      Effect.provideService(Scope.Scope, attemptScope),
-      Effect.onExit((exit) =>
-        Exit.isFailure(exit) ? Scope.close(attemptScope, exit) : Effect.void,
+      Effect.tapError((failure) =>
+        Effect.logWarning("Stream mutation request failed", {
+          operation: input.operation,
+          url,
+          status: failure.response?.status,
+          transport: failure.cause?.reason._tag,
+          streamingBodyConsumed: bodyState.consumed,
+        }),
       ),
-    );
-  }).pipe(
-    Effect.tapError((failure) =>
-      Effect.logWarning("Stream mutation request failed", {
-        operation: input.operation,
-        url,
-        status: failure.response?.status,
-        transport: failure.cause?.reason._tag,
+      Effect.retry({
+        while: (failure) => input.producer !== true && failure.retryable && !bodyState.consumed,
+        schedule: requestRetrySchedule(input.connection),
       }),
-    ),
-    Effect.retry({
-      while: (failure) => input.safe && failure.retryable,
-      schedule: requestRetrySchedule(input.connection),
-    }),
-  );
+    );
+  });
 };
 
-export const sendCatchupRequest = (input: {
+export const sendReadRequest = (input: {
   readonly connection: DurableStreamsConnection;
   readonly position: { readonly offset: string; readonly cursor?: string };
+  readonly longPoll: boolean;
+  readonly sse?: boolean;
 }) =>
   Effect.gen(function* () {
     const scope = yield* Scope.fork(yield* Effect.scope);
@@ -319,6 +336,8 @@ export const sendCatchupRequest = (input: {
             connection: input.connection,
             method: "GET",
             readPosition: input.position,
+            longPoll: input.longPoll,
+            sse: input.sse,
           }),
         )
         .pipe(
@@ -328,7 +347,7 @@ export const sendCatchupRequest = (input: {
           ),
           Effect.mapError((cause) => new ReadRequestFailure({ cause })),
         );
-      if (response.status === 200) return response;
+      if (response.status === 200 || (input.longPoll && response.status === 204)) return response;
       const snapshot = yield* _snapshotResponse({
         response,
         url: input.connection.url.origin + input.connection.url.pathname,
@@ -392,9 +411,16 @@ export const sendCatchupRequest = (input: {
         ),
       );
     }),
-    Effect.withSpan("durable_streams.read.catchup", {
-      attributes: { url: input.connection.url.origin + input.connection.url.pathname },
-    }),
+    Effect.withSpan(
+      input.sse
+        ? "durable_streams.read.sse"
+        : input.longPoll
+          ? "durable_streams.read.long_poll"
+          : "durable_streams.read.catchup",
+      {
+        attributes: { url: input.connection.url.origin + input.connection.url.pathname },
+      },
+    ),
   );
 
 class ReadRequestFailure extends Data.TaggedError("ReadRequestFailure")<{

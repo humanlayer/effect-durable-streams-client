@@ -17,6 +17,34 @@ export const parseRetryAfter = (raw: string | undefined) =>
 
 export type RetryDelayInput = { readonly retryAfter?: Duration.Duration };
 
+export const waitForSseReconnect = (input: {
+  readonly connection: DurableStreamsConnection;
+  readonly shortConnections: number;
+}) =>
+  Effect.void.pipe(
+    Effect.repeat(
+      Schedule.recurs(1).pipe(
+        Schedule.modifyDelay(() =>
+          Random.next.pipe(
+            Effect.map((random) =>
+              Duration.millis(
+                Math.floor(
+                  random *
+                    Math.min(
+                      input.connection.sseResilience?.backoffMaxDelay ?? 5000,
+                      (input.connection.sseResilience?.backoffBaseDelay ?? 100) *
+                        2 ** input.shortConnections,
+                    ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+    Effect.withSpan("durable_streams.read.sse_reconnect"),
+  );
+
 export const requestRetrySchedule = (connection: DurableStreamsConnection) => {
   const options = connection.backoffOptions;
   const initial = options?.initialDelay ?? 100;

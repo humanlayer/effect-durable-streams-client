@@ -14,10 +14,32 @@ import {
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { DurableStreamsClient, DurableStreamsConnection } from "../src/index.ts";
-import { parseRetryAfter, requestRetrySchedule } from "../src/retry.ts";
+import { parseRetryAfter, requestRetrySchedule, waitForSseReconnect } from "../src/retry.ts";
 import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.ts";
 
 describe("reference retry policy", () => {
+  it.effect("caps SSE full jitter and floors fractional milliseconds", () =>
+    Effect.gen(function* () {
+      const connection = yield* Schema.decodeEffect(DurableStreamsConnection)({
+        url: "https://streams.test/s",
+      });
+      const completed = yield* Ref.make(false);
+      const run = yield* waitForSseReconnect({ connection, shortConnections: 20 }).pipe(
+        Effect.tap(() => Ref.set(completed, true)),
+        Effect.forkChild,
+      );
+      yield* TestClock.adjust("1665 millis");
+      expect(yield* Ref.get(completed)).toBe(false);
+      yield* TestClock.adjust("1 millis");
+      yield* Fiber.join(run);
+      expect(yield* Ref.get(completed)).toBe(true);
+    }).pipe(
+      Effect.provideService(Random.Random, {
+        nextDoubleUnsafe: () => 1 / 3,
+        nextIntUnsafe: () => 0,
+      }),
+    ),
+  );
   it.effect("matches 100ms/1.3/capped full jitter indefinitely and honors server floors", () =>
     Effect.gen(function* () {
       const connection = yield* Schema.decodeEffect(DurableStreamsConnection)({
@@ -129,7 +151,7 @@ describe("reference retry policy", () => {
     ),
   );
 
-  it.effect("honors configured maxRetries and does not retry HEAD or unsupported 501", () =>
+  it.effect("honors configured maxRetries and does not retry HEAD or definitive 405", () =>
     Effect.gen(function* () {
       const http = yield* makeScriptedHttpClient;
       const client = yield* DurableStreamsClient.make({
@@ -150,9 +172,9 @@ describe("reference retry policy", () => {
       expect(error).toHaveProperty("response.status", 503);
       yield* Queue.take(http.requests);
       for (const operation of [client.head, client.close({}), client.delete]) {
-        yield* http.respond(ScriptedResponse.Response({ status: 501, headers: {} }));
+        yield* http.respond(ScriptedResponse.Response({ status: 405, headers: {} }));
         expect(yield* operation.pipe(Effect.flip, Effect.provide(http.layer))).toMatchObject({
-          _tag: operation === client.head ? "StreamUnavailableError" : "OperationNotSupportedError",
+          _tag: operation === client.head ? "ProtocolViolationError" : "OperationNotSupportedError",
         });
         yield* Queue.take(http.requests);
         expect(yield* Queue.size(http.requests)).toBe(0);

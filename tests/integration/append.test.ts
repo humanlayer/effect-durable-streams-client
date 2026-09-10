@@ -109,7 +109,7 @@ describe("reference server batched and streaming writes", () => {
         const decode = Schema.decodeEffect(Schema.fromJsonString(Schema.Json));
         expect(
           yield* decode(yield* processLine(yield* encode({ type: "init", serverUrl: baseUrl }))),
-        ).toMatchObject({ features: { batching: true, streaming: false } });
+        ).toMatchObject({ features: { batching: true, streaming: true } });
         yield* processLine('{"type":"create","path":"/local","contentType":"application/json"}');
         expect(
           yield* decode(
@@ -126,8 +126,8 @@ describe("reference server batched and streaming writes", () => {
               '{"type":"idempotent-append-batch","path":"/local","items":["4"],"producerId":"p","epoch":0,"autoClaim":false}',
             ),
           ),
-        ).toMatchObject({ type: "error", commandType: "idempotent-append-batch" });
-        expect(yield* (yield* http.get(baseUrl + "/local")).json).toEqual([1, [2, 3], null]);
+        ).toMatchObject({ type: "idempotent-append-batch", success: true });
+        expect(yield* (yield* http.get(baseUrl + "/local")).json).toEqual([1, [2, 3], null, 4]);
       }).pipe(
         Effect.provide(
           Layer.merge(FetchHttpClient.layer, Layer.effect(AdapterState, AdapterState.make)),

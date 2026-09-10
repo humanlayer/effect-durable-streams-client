@@ -14,6 +14,7 @@ import {
   Stream,
 } from "effect";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http";
+import { TestClock } from "effect/testing";
 import { DurableStreamsClient, type AppendError } from "../src/index.ts";
 import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.ts";
 
@@ -23,6 +24,116 @@ class SourceConfig extends Context.Service<SourceConfig, { readonly chunk: strin
 ) {}
 
 describe("streamed request bodies", () => {
+  it.effect("retries an untouched upload without losing its source or sequence", () =>
+    Effect.gen(function* () {
+      const attempts = yield* Queue.unbounded<number>();
+      const produced = yield* Ref.make(0);
+      const calls = { count: 0 };
+      const http = HttpClient.make((request) =>
+        Effect.gen(function* () {
+          yield* Queue.offer(attempts, ++calls.count);
+          expect(request.headers["stream-seq"]).toBe("opaque");
+          if (calls.count === 1)
+            return HttpClientResponse.fromWeb(
+              request,
+              new Response(null, { status: 503, headers: { "retry-after": "2" } }),
+            );
+          if (calls.count === 2)
+            return yield* new HttpClientError.HttpClientError({
+              reason: new HttpClientError.TransportError({ request }),
+            });
+          const chunks = yield* Match.value(request.body).pipe(
+            Match.tag("Stream", ({ stream }) =>
+              stream.pipe(
+                Stream.mapError(
+                  (cause) =>
+                    new HttpClientError.HttpClientError({
+                      reason: new HttpClientError.TransportError({ request, cause }),
+                    }),
+                ),
+                Stream.runCollect,
+              ),
+            ),
+            Match.orElse(() => Effect.die("Expected stream")),
+          );
+          expect(chunks).toEqual([new TextEncoder().encode("complete")]);
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response(null, { status: 204, headers: { "stream-next-offset": "tail" } }),
+          );
+        }),
+      );
+      const client = yield* DurableStreamsClient.make({ url: "https://streams.test/bytes" });
+      const source = Stream.fromEffect(
+        Ref.update(produced, (n) => n + 1).pipe(Effect.as("complete")),
+      );
+      const run = yield* client
+        .appendStream({ source, seq: "opaque" })
+        .pipe(Effect.provideService(HttpClient.HttpClient, http), Effect.forkChild);
+      expect(yield* Queue.take(attempts)).toBe(1);
+      yield* TestClock.adjust("1999 millis");
+      expect(yield* Ref.get(produced)).toBe(0);
+      expect(yield* Queue.size(attempts)).toBe(0);
+      yield* TestClock.adjust("1 millis");
+      expect(yield* Queue.take(attempts)).toBe(2);
+      yield* TestClock.adjust("200 millis");
+      expect(yield* Queue.take(attempts)).toBe(3);
+      expect(yield* Fiber.join(run)).toHaveProperty("offset", "tail");
+      expect(yield* Ref.get(produced)).toBe(1);
+    }),
+  );
+
+  for (const failure of ["server", "transport"] as const) {
+    it.effect(`does not resend a consumed streaming tail after ${failure} failure`, () =>
+      Effect.gen(function* () {
+        const calls = yield* Ref.make(0);
+        const produced = yield* Ref.make(0);
+        const released = yield* Ref.make(false);
+        const signals: Array<AbortSignal> = [];
+        const http = HttpClient.make((request, _url, signal) =>
+          Effect.gen(function* () {
+            signals.push(signal);
+            yield* Ref.update(calls, (n) => n + 1);
+            yield* Match.value(request.body).pipe(
+              Match.tag("Stream", ({ stream }) =>
+                stream.pipe(
+                  Stream.take(1),
+                  Stream.mapError(
+                    (cause) =>
+                      new HttpClientError.HttpClientError({
+                        reason: new HttpClientError.TransportError({ request, cause }),
+                      }),
+                  ),
+                  Stream.runDrain,
+                ),
+              ),
+              Match.orElse(() => Effect.die("Expected stream")),
+            );
+            if (failure === "transport")
+              return yield* new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({ request }),
+              });
+            return HttpClientResponse.fromWeb(request, new Response(null, { status: 503 }));
+          }),
+        );
+        const client = yield* DurableStreamsClient.make({ url: "https://streams.test/bytes" });
+        const source = Stream.make("first", "must-not-send-tail").pipe(
+          Stream.rechunk(1),
+          Stream.tap(() => Ref.update(produced, (n) => n + 1)),
+          Stream.ensuring(Ref.set(released, true)),
+        );
+        expect(
+          yield* client
+            .appendStream({ source })
+            .pipe(Effect.flip, Effect.provideService(HttpClient.HttpClient, http)),
+        ).toHaveProperty("_tag", "AppendOutcomeUnknownError");
+        expect(yield* Ref.get(calls)).toBe(1);
+        expect(yield* Ref.get(produced)).toBe(1);
+        expect(yield* Ref.get(released)).toBe(true);
+        expect(signals.every((signal) => signal.aborted)).toBe(true);
+      }),
+    );
+  }
   it.effect(
     "owns the native bridge consumer even when transport does not cancel its Web body",
     () =>
@@ -64,11 +175,14 @@ describe("streamed request bodies", () => {
       }),
   );
   it.effect(
-    "does not replay transport or server uncertainty and validates seq before sending",
+    "classifies transport or server uncertainty with retries disabled and validates seq before sending",
     () =>
       Effect.gen(function* () {
         const http = yield* makeScriptedHttpClient;
-        const client = yield* DurableStreamsClient.make({ url: "https://streams.test/bytes" });
+        const client = yield* DurableStreamsClient.make({
+          url: "https://streams.test/bytes",
+          backoffOptions: { maxRetries: 0 },
+        });
         for (const reply of [
           ScriptedResponse.TransportFailure(),
           ScriptedResponse.Response({ status: 503, headers: {} }),

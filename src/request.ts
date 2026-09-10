@@ -38,6 +38,8 @@ export type RequestInput = {
   readonly connection: DurableStreamsConnection;
   readonly method: "HEAD" | "GET" | "PUT" | "POST" | "DELETE";
   readonly readPosition?: { readonly offset: string; readonly cursor?: string };
+  readonly longPoll?: boolean;
+  readonly sse?: boolean;
   readonly headers?: Readonly<Record<string, string | undefined>>;
   readonly body?: Uint8Array;
   readonly bodyStream?: Stream.Stream<Uint8Array, unknown>;
@@ -52,6 +54,8 @@ export const buildRequest = (input: RequestInput) => {
     if (input.readPosition.cursor !== undefined)
       url.searchParams.set("cursor", input.readPosition.cursor);
   }
+  if (input.longPoll) url.searchParams.set("live", "long-poll");
+  if (input.sse) url.searchParams.set("live", "sse");
   url.searchParams.sort();
   const headers = {
     ...input.connection.headers,

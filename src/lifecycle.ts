@@ -99,7 +99,6 @@ export const createStream = <S extends Schema.Top>(
       connection: context.connection,
       operation: "create",
       method: "PUT",
-      safe: true,
       headers: {
         ...lifetime,
         "content-type": contentType,
@@ -156,7 +155,7 @@ export const createStream = <S extends Schema.Top>(
 export const deleteStream = (
   connection: DurableStreamsConnection,
 ): Effect.Effect<void, Errors.DeleteError, HttpClient.HttpClient> =>
-  sendMutation({ connection, operation: "delete", method: "DELETE", safe: true }).pipe(
+  sendMutation({ connection, operation: "delete", method: "DELETE" }).pipe(
     Effect.flatMap((response) =>
       response.status === 204
         ? Effect.void
@@ -207,7 +206,6 @@ const _write = <S extends Schema.Top>(request: WriteRequest<S>) =>
       connection,
       method: "POST",
       operation,
-      safe: operation === "close" && !Predicate.hasProperty(input, "value"),
       headers: {
         "content-type":
           body === undefined && request.prepared?.bodyStream === undefined

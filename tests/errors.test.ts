@@ -15,12 +15,13 @@ import {
 import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.ts";
 
 describe("mutation error contracts", () => {
-  it.effect("classifies every ordinary rejection without automatic replay", () =>
+  it.effect("classifies ordinary failures when retries are explicitly disabled", () =>
     Effect.gen(function* () {
       const http = yield* makeScriptedHttpClient;
       const client = yield* DurableStreamsClient.make({
         url: "https://streams.test/orders?secret=private",
         contentType: "text/plain",
+        backoffOptions: { maxRetries: 0 },
       });
       for (const [status, tag] of [
         [400, "InvalidRequestError"],
@@ -66,6 +67,7 @@ describe("mutation error contracts", () => {
       const client = yield* DurableStreamsClient.make({
         url: "https://user:password@streams.test/orders?token=private",
         contentType: "text/plain",
+        backoffOptions: { maxRetries: 0 },
       });
       yield* http.respond(
         ScriptedResponse.Response({

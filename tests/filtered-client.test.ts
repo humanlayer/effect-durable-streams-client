@@ -1,6 +1,6 @@
 import { inspect } from "node:util";
 import { describe, expect, it } from "@effect/vitest";
-import { Duration, Effect, Fiber, Layer, Logger, Queue, Schema } from "effect";
+import { Effect, Fiber, Layer, Logger, Queue, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import {
@@ -64,7 +64,6 @@ describe("ambient status-filtered HTTP clients", () => {
         for (const [status, tag] of [
           [404, "StreamNotFoundError"],
           [405, "OperationNotSupportedError"],
-          [501, "OperationNotSupportedError"],
         ] as const) {
           yield* http.respond(ScriptedResponse.Response({ status, headers: {} }));
           expect(
@@ -123,46 +122,41 @@ describe("ambient status-filtered HTTP clients", () => {
     }),
   );
 
-  it.effect(
-    "honors filtered Retry-After for safe mutations but does not replay ordinary writes",
-    () =>
-      Effect.gen(function* () {
-        const http = yield* makeScriptedHttpClient;
-        const client = yield* DurableStreamsClient.make({
-          url: "https://streams.test/orders",
-          contentType: "text/plain",
-        });
-        const layer = Filtered.pipe(Layer.provide(http.layer));
-        for (const status of [429, 503, 307]) {
-          yield* http.respond(
-            ScriptedResponse.Response({ status, headers: { "retry-after": "2" } }),
-          );
-          yield* http.respond(ScriptedResponse.Response({ status: 204, headers: {} }));
-          const fiber = yield* client.delete.pipe(Effect.provide(layer), Effect.forkChild);
-          yield* Queue.take(http.requests);
-          yield* TestClock.adjust("1 second");
-          expect(yield* Queue.size(http.requests)).toBe(0);
-          yield* TestClock.adjust("1 second");
-          yield* Fiber.join(fiber);
-          yield* Queue.take(http.requests);
-        }
-        for (const status of [429, 503, 307]) {
-          yield* http.respond(
-            ScriptedResponse.Response({ status, headers: { "retry-after": "2" } }),
-          );
-          yield* client.append({ value: "private" }).pipe(
-            Effect.catchTags({
-              RateLimitedError: (error) =>
-                Effect.sync(() => expect(error.retryAfter).toEqual(Duration.seconds(2))),
-              AppendOutcomeUnknownError: (error) =>
-                Effect.sync(() => expect(error.response?.status).toBe(status)),
-            }),
-            Effect.provide(layer),
-          );
-          yield* Queue.take(http.requests);
-          expect(yield* Queue.size(http.requests)).toBe(0);
-        }
-      }),
+  it.effect("honors filtered Retry-After for lifecycle and ordinary writes including 501", () =>
+    Effect.gen(function* () {
+      const http = yield* makeScriptedHttpClient;
+      const client = yield* DurableStreamsClient.make({
+        url: "https://streams.test/orders",
+        contentType: "text/plain",
+      });
+      const layer = Filtered.pipe(Layer.provide(http.layer));
+      for (const status of [429, 503, 307, 501]) {
+        yield* http.respond(ScriptedResponse.Response({ status, headers: { "retry-after": "2" } }));
+        yield* http.respond(ScriptedResponse.Response({ status: 204, headers: {} }));
+        const fiber = yield* client.delete.pipe(Effect.provide(layer), Effect.forkChild);
+        yield* Queue.take(http.requests);
+        yield* TestClock.adjust("1 second");
+        expect(yield* Queue.size(http.requests)).toBe(0);
+        yield* TestClock.adjust("1 second");
+        yield* Fiber.join(fiber);
+        yield* Queue.take(http.requests);
+      }
+      for (const status of [429, 503, 307, 501]) {
+        yield* http.respond(ScriptedResponse.Response({ status, headers: { "retry-after": "2" } }));
+        yield* http.respond(
+          ScriptedResponse.Response({ status: 204, headers: { "stream-next-offset": "tail" } }),
+        );
+        const run = yield* client
+          .append({ value: "private" })
+          .pipe(Effect.provide(layer), Effect.forkChild);
+        yield* Queue.take(http.requests);
+        yield* TestClock.adjust("1999 millis");
+        expect(yield* Queue.size(http.requests)).toBe(0);
+        yield* TestClock.adjust("1 millis");
+        expect(yield* Fiber.join(run)).toHaveProperty("offset", "tail");
+        yield* Queue.take(http.requests);
+      }
+    }),
   );
 
   it.effect("keeps filtered response bodies in scope until captured then releases them", () =>

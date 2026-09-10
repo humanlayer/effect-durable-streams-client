@@ -236,3 +236,51 @@ export type ReadError =
   | StreamUnavailableError
   | PayloadDecodeError
   | ProtocolViolationError;
+
+export class ProducerClosedError extends Schema.TaggedError<ProducerClosedError>()(
+  "ProducerClosedError",
+  {},
+) {
+  override get message() {
+    return "Producer is closed or detached";
+  }
+}
+export class ProducerFencedError extends Schema.TaggedError<ProducerFencedError>()(
+  "ProducerFencedError",
+  {
+    currentEpoch: Schema.Int,
+    response: ErrorResponse,
+  },
+) {
+  override get message() {
+    return "Producer epoch is stale";
+  }
+}
+export class ProducerSequenceGapError extends Schema.TaggedError<ProducerSequenceGapError>()(
+  "ProducerSequenceGapError",
+  {
+    expectedSequence: Schema.Int,
+    receivedSequence: Schema.Int,
+    response: ErrorResponse,
+  },
+) {
+  override get message() {
+    return "Producer sequence gap";
+  }
+}
+export type ProducerError =
+  | ProducerClosedError
+  | ProducerFencedError
+  | ProducerSequenceGapError
+  | UnauthorizedError
+  | ForbiddenError
+  | StreamNotFoundError
+  | StreamGoneError
+  | StreamClosedError
+  | InvalidRequestError
+  | PayloadTooLargeError
+  | OperationNotSupportedError
+  | RateLimitedError
+  | StreamUnavailableError
+  | PayloadEncodeError
+  | ProtocolViolationError;

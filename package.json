@@ -1,47 +1,63 @@
 {
-  "name": "@humanlayer/template-library",
+  "name": "@humanlayer/effect-durable-streams-client",
   "version": "0.0.0",
-  "description": "A starter for creating a TypeScript package.",
-  "homepage": "https://github.com/author/library#readme",
+  "private": true,
+  "description": "Effect-native Durable Streams client with typed streams, schemas, and scoped idempotent producers.",
+  "homepage": "https://github.com/humanlayer/effect-durable-streams-client#readme",
   "bugs": {
-    "url": "https://github.com/author/library/issues"
+    "url": "https://github.com/humanlayer/effect-durable-streams-client/issues"
   },
   "license": "MIT",
-  "author": "Author Name <author.name@mail.com>",
+  "author": "HumanLayer",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/author/library.git"
+    "url": "git+https://github.com/humanlayer/effect-durable-streams-client.git"
   },
   "files": [
     "dist"
   ],
   "type": "module",
   "exports": {
-    ".": "./dist/index.mjs",
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./async-await": {
+      "types": "./dist/async-await.d.mts",
+      "import": "./dist/async-await.mjs"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "build": "vp pack",
     "dev": "vp pack --watch",
     "test": "vp test",
+    "test:integration": "vp test tests/integration",
+    "test:package": "vp test tests/package.test.ts",
+    "release:tag-info": "bash scripts/release-tag-info.sh",
+    "release:prepare": "bash scripts/release-prepare.sh",
+    "release:publish": "bash scripts/release-publish.sh",
+    "test:conformance": "vp exec client-conformance-tests --run ./tests/conformance/run-adapter.sh",
     "check": "vp check && bun run typed",
     "typed": "node --import tsx tools/typed-lint/src/cli.ts check --config typed-lint.config.json",
     "diff:check": "node --import tsx tools/diff-check/src/main.ts --config tools/diff-check/diff-check.config.json",
-    "prepublishOnly": "vp run build",
+    "prepublishOnly": "echo 'Publish with vp run release:publish --version VERSION, not the source placeholder' >&2; exit 1",
     "prepare": "effect-tsgo patch --oxlint"
   },
-  "dependencies": {
-    "effect": "^4.0.0-beta.107"
-  },
   "devDependencies": {
+    "@durable-streams/client-conformance-tests": "0.2.12",
+    "@durable-streams/server": "0.3.8",
+    "@effect/platform-node": "4.0.0-rc.112",
     "@effect/tsgo": "^0.38.0",
-    "@effect/vitest": "^4.0.0-beta.107",
+    "@effect/vitest": "4.0.0-rc.112",
     "@oxlint/plugins": "^1.80.0",
     "@types/node": "^26.1.1",
     "bumpp": "^11.1.0",
+    "effect": "4.0.0-rc.112",
     "eslint-plugin-better-tailwindcss": "^4.7.0",
     "fast-glob": "^3.3.3",
     "oxlint": "1.80.0",
@@ -53,6 +69,9 @@
     "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0",
     "vite-plus": "^0.3.0"
   },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.112"
+  },
   "overrides": {
     "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0"
   },
@@ -60,7 +79,7 @@
     "packageManager": {
       "name": "bun",
       "version": "1.4.0",
-      "onFail": "download"
+      "onFail": "ignore"
     }
   }
 }

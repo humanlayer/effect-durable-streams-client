@@ -1,8 +1,8 @@
-import type { TypedRule, WorkspaceRule } from "./rule.js";
-import noXstateDerivedBooleanContext from "./rules/no-xstate-derived-boolean-context.js";
-import preferEffectArrayMatch from "./rules/prefer-effect-array-match.js";
-import preferTypedSchemaApis from "./rules/prefer-typed-schema-apis.js";
-import noSvgFiles from "./workspace-rules/no-svg-files.js";
+import type { TypedRule, WorkspaceRule } from "./rule";
+import noXstateDerivedBooleanContext from "./rules/no-xstate-derived-boolean-context";
+import preferEffectArrayMatch from "./rules/prefer-effect-array-match";
+import preferTypedSchemaApis from "./rules/prefer-typed-schema-apis";
+import noSvgFiles from "./workspace-rules/no-svg-files";
 
 export const typedRules = {
   "no-xstate-derived-boolean-context": noXstateDerivedBooleanContext,

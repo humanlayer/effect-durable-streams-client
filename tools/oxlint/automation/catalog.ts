@@ -17,15 +17,6 @@ export interface OxlintRuleMetadata {
   readonly exceptions: string;
 }
 
-const warningRules = new Set([
-  "no-cascading-layer-provide",
-  "no-effect-asvoid",
-  "no-nested-layer-provide",
-  "no-non-route-layout-files",
-  "pipe-max-arguments",
-  "prefer-option-from-nullable",
-]);
-
 const profileRules: Readonly<Record<RuleProfile, ReadonlyArray<string>>> = {
   architecture: [
     "no-api-backend-imports",
@@ -140,7 +131,7 @@ export const oxlintRuleMetadata: ReadonlyArray<OxlintRuleMetadata> =
     names.map((name) => ({
       name,
       profile: profile as RuleProfile,
-      severity: warningRules.has(name) ? "warn" : "error",
+      severity: "error",
       applicability: profileApplicability[profile as RuleProfile],
       options: configurableRules[name] ?? "None.",
       exceptions: exceptionNotes[name] ?? "None.",

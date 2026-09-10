@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
-import type { ChangedFileRule } from "./changed-file-rules.ts";
+import type { ChangedFileRule } from "./changed-file-rules";
 import {
   collectChangedFileViolations,
   collectViolations,
   type OxlintDiagnostic,
   parseAddedLineRanges,
   renderReport,
-} from "./diff-check.ts";
+} from "./diff-check";
 
 export interface DiffCheckConfig {
   readonly baseRef: string;
@@ -80,6 +80,19 @@ const run = (command: string, args: ReadonlyArray<string>, cwd?: string) =>
   });
 
 const nullDelimited = (value: string) => value.split("\0").filter((entry) => entry.length > 0);
+
+export const runLint = (command: string, args: ReadonlyArray<string>, cwd: string) => {
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.error !== undefined) throw result.error;
+  if (result.status !== 0 && result.status !== 1) {
+    throw new Error(`Lint execution failed (${result.signal ?? result.status}): ${result.stderr}`);
+  }
+  return result.stdout;
+};
 
 export const parseArguments = (args: ReadonlyArray<string>) => {
   let baseRef: string | undefined;
@@ -160,7 +173,7 @@ export const execute = () => {
           addedLines,
           diagnostics: (
             JSON.parse(
-              run(
+              runLint(
                 "oxlint",
                 [
                   "-c",

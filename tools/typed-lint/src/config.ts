@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type { RuleName } from "./registry.js";
-import type { Severity } from "./rule.js";
+import type { RuleName } from "./registry";
+import type { Severity } from "./rule";
 
 export type RuleSetting =
   | Severity

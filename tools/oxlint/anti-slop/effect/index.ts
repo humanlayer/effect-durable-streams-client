@@ -1,10 +1,10 @@
 import { eslintCompatPlugin } from "@oxlint/plugins";
 
-import { noManualEffectErrorTagRule } from "./rules/no-manual-effect-error-tag.ts";
-import { noManualTagComparisonRule } from "./rules/no-manual-tag-comparison.ts";
-import { noManualTaggedConstructionRule } from "./rules/no-manual-tagged-construction.ts";
-import { noServiceConstructorImportsRule } from "./rules/no-service-constructor-imports.ts";
-import { preferEffectMatchRule } from "./rules/prefer-effect-match.ts";
+import { noManualEffectErrorTagRule } from "./rules/no-manual-effect-error-tag";
+import { noManualTagComparisonRule } from "./rules/no-manual-tag-comparison";
+import { noManualTaggedConstructionRule } from "./rules/no-manual-tagged-construction";
+import { noServiceConstructorImportsRule } from "./rules/no-service-constructor-imports";
+import { preferEffectMatchRule } from "./rules/prefer-effect-match";
 
 /** Opt-in Oxlint rules for Effect service and Layer architecture. */
 const antiSlopEffectPlugin = eslintCompatPlugin({

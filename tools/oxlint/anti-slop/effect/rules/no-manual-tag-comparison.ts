@@ -4,7 +4,7 @@ import {
 	isInsideBroadEffectHandler,
 	isTagMember,
 	tagMemberFromComparison,
-} from "../shared/tagged-values.ts";
+} from "../shared/tagged-values";
 
 export const noManualTagComparisonRule = defineRule({
 	meta: {

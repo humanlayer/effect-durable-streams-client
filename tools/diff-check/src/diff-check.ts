@@ -1,4 +1,4 @@
-import type { ChangedFileRule } from "./changed-file-rules.ts";
+import type { ChangedFileRule } from "./changed-file-rules";
 
 export interface AddedLineRange {
   readonly start: number;

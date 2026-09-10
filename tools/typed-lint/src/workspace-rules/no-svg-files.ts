@@ -2,7 +2,7 @@ import path from "node:path";
 
 import fg from "fast-glob";
 
-import type { WorkspaceRule } from "../rule.js";
+import type { WorkspaceRule } from "../rule";
 
 const stringArrayOption = ({
   fallback,

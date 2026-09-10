@@ -1,5 +1,5 @@
-import { allRules, profile } from "./profiles.ts";
-import type { RuleProfile } from "./catalog.ts";
+import { allRules, profile } from "./profiles";
+import type { RuleProfile } from "./catalog";
 
 export interface ConfigOptions {
   readonly namespace?: string;
@@ -13,9 +13,9 @@ export interface ConfigOptions {
 const builtInRules = {
   "no-console": "error",
   "no-empty": "error",
-  "no-empty-function": "warn",
+  "no-empty-function": "error",
   "no-eq-null": "error",
-  "no-unused-vars": "warn",
+  "no-unused-vars": "error",
   "unicorn/filename-case": "error",
   "require-yield": "off",
   "no-shadow": "off",
@@ -81,7 +81,7 @@ export const createConfig = ({
     ],
     categories: {
       correctness: "error",
-      suspicious: "warn",
+      suspicious: "error",
     },
     settings: tailwindEnabled
       ? {
@@ -93,6 +93,7 @@ export const createConfig = ({
     rules: {
       ...customRules,
       ...builtInRules,
+      ...documentedDisabledRules,
       ...(tailwindEnabled
         ? {
             ...tailwindRules,

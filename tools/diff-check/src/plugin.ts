@@ -1,5 +1,5 @@
-import noExplicitFunctionReturnType from "./rules/no-explicit-function-return-type.ts";
-import noLet from "./rules/no-let.ts";
+import noExplicitFunctionReturnType from "./rules/no-explicit-function-return-type";
+import noLet from "./rules/no-let";
 import type { RuleTester } from "oxlint/plugins-dev";
 
 type Rule = Parameters<RuleTester["run"]>[1];

@@ -1,6 +1,6 @@
 import * as ts from "typescript-compiler";
 
-import type { RuleContext, TypedRule } from "../rule.js";
+import type { RuleContext, TypedRule } from "../rule";
 
 const _decodeMethods = new Map([
   ["decodeUnknownEffect", "decodeEffect"],

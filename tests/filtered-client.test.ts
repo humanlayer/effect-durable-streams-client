@@ -10,8 +10,8 @@ import {
   type HeadError,
   DurableStreamsClient,
   ErrorResponseBody,
-} from "../src/index.js";
-import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.js";
+} from "../src/index";
+import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client";
 
 const Filtered = Layer.effect(
   HttpClient.HttpClient,

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Queue, Stream } from "effect";
 import { TestClock } from "effect/testing";
-import { AdapterState } from "./adapter-state.js";
-import { handleCommand } from "./adapter.js";
-import { makeReadHttp, readReply } from "../support/read-http.js";
+import { AdapterState } from "./adapter-state";
+import { handleCommand } from "./adapter";
+import { makeReadHttp, readReply } from "../support/read-http";
 
 describe("SSE adapter deadline ownership", () => {
   for (const acknowledged of [false, true]) {

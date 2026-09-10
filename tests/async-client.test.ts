@@ -1,10 +1,6 @@
 import { Deferred, Effect, Exit, Predicate, Record } from "effect";
 import { describe, expect, it } from "@effect/vitest";
-import {
-  DurableStream,
-  IdempotentProducer,
-  InvalidClientOptionsError,
-} from "../src/async-await.js";
+import { DurableStream, IdempotentProducer, InvalidClientOptionsError } from "../src/async-await";
 
 const _response = (
   body: string,

@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "@effect/vitest";
 import { Context, Deferred, Effect, Schema, SchemaGetter, Scope } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/unstable/http";
-import { DurableStream, makeEffectClient } from "../src/async-await.js";
+import { DurableStream, makeEffectClient } from "../src/async-await";
 
 class Encoder extends Context.Service<Encoder, { readonly suffix: string }>()("async/Encoder") {}
 class Decoder extends Context.Service<Decoder, { readonly prefix: string }>()("async/Decoder") {}

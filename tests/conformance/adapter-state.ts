@@ -1,5 +1,5 @@
 import { Clock, Context, Data, Effect, Exit, Match, Option, Ref, Schema, Scope } from "effect";
-import type { IdempotentProducer } from "../../src/index.js";
+import type { IdempotentProducer } from "../../src/index";
 import { HttpClientRequest } from "effect/unstable/http";
 
 export class AdapterNotInitialized extends Data.TaggedError("AdapterNotInitialized") {}

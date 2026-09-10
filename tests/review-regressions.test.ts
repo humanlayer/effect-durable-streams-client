@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer, Logger, Match, Queue, Schema, SchemaGetter, Stream } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
-import { DurableStreamsClient, ErrorResponseBody } from "../src/index.js";
-import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.js";
+import { DurableStreamsClient, ErrorResponseBody } from "../src/index";
+import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client";
 
 const UndefinedFromNull = Schema.Null.pipe(
   Schema.decodeTo(Schema.Undefined, {

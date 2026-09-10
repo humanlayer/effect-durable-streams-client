@@ -1,11 +1,11 @@
 import { Array as Arr, Deferred, Effect, Exit, Queue, Schema, Scope, Stream } from "effect";
-import { allocateRead, type ReadBatch, type ReadBoundary } from "./read.js";
-import { allocateTextDecoder, decodeJson } from "./encoding.js";
-import { PayloadDecodeError } from "./errors.js";
-import type { DurableStreamsConnection } from "./model.js";
-import { AbortError, DurableStreamError, unwrapClientExit } from "./client-errors.js";
-import type { createClientRuntime } from "./client-runtime.js";
-import type { LiveMode } from "./async-await.js";
+import { allocateRead, type ReadBatch, type ReadBoundary } from "./read";
+import { allocateTextDecoder, decodeJson } from "./encoding";
+import { PayloadDecodeError } from "./errors";
+import type { DurableStreamsConnection } from "./model";
+import { AbortError, DurableStreamError, unwrapClientExit } from "./client-errors";
+import type { createClientRuntime } from "./client-runtime";
+import type { LiveMode } from "./async-await";
 
 export type BatchMeta = ReadBoundary;
 export type JsonBatch<A> = BatchMeta & { readonly items: ReadonlyArray<A> };
@@ -48,7 +48,7 @@ export type StreamResponse<A> = {
   cancel(reason?: unknown): void;
 };
 
-const _concat = (chunks: ReadonlyArray<Uint8Array>) => {
+const concat = (chunks: ReadonlyArray<Uint8Array>) => {
   const bytes = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.length, 0));
   const cursor = { offset: 0 };
   for (const chunk of chunks) {
@@ -74,12 +74,12 @@ export const decodeReadJson = <S extends Schema.Top>({
         : decodeJson({ source: Stream.fromIterable(batch.chunks), schema })
       ).pipe(Stream.runCollect);
 
-const _callback = <A>(value: A, fn: (value: A) => void | Promise<void>) =>
+const callback = <A>(value: A, fn: (value: A) => void | Promise<void>) =>
   Effect.tryPromise({
     try: async () => fn(value),
     catch: () => new PayloadDecodeError({ component: "subscription callback" }),
   });
-const _metadata = (batch: ResponseState["metadata"]) =>
+const metadata = (batch: ResponseState["metadata"]) =>
   ({
     offset: batch.offset,
     cursor: batch.cursor,
@@ -190,7 +190,7 @@ export const openStreamResponse = async <A>(input: {
                 Effect.andThen(
                   complete.pipe(
                     Effect.map((ready) => {
-                      if (ready && !batch.partial) state.metadata = _metadata(batch);
+                      if (ready && !batch.partial) state.metadata = metadata(batch);
                     }),
                   ),
                 ),
@@ -400,7 +400,7 @@ export const openStreamResponse = async <A>(input: {
             for (const chunk of batch.chunks) chunks.push(chunk);
           }),
       });
-      return _concat(chunks);
+      return concat(chunks);
     },
     async text() {
       claim();
@@ -452,7 +452,7 @@ export const openStreamResponse = async <A>(input: {
       return web(input.decodeJson, true);
     },
     subscribeBytes: (fn) =>
-      subscribe((batch) => _callback({ ..._metadata(batch), data: _concat(batch.chunks) }, fn)),
+      subscribe((batch) => callback({ ...metadata(batch), data: concat(batch.chunks) }, fn)),
     subscribeText: (fn) => {
       return subscribe(
         (batch) =>
@@ -460,7 +460,7 @@ export const openStreamResponse = async <A>(input: {
             Effect.flatMap((text) =>
               textDecoder.complete.pipe(
                 Effect.flatMap((ready) =>
-                  ready ? _callback({ ..._metadata(batch), text }, fn) : Effect.void,
+                  ready ? callback({ ...metadata(batch), text }, fn) : Effect.void,
                 ),
               ),
             ),
@@ -473,7 +473,7 @@ export const openStreamResponse = async <A>(input: {
         (batch) =>
           input
             .decodeJson(batch)
-            .pipe(Effect.flatMap((items) => _callback({ ..._metadata(batch), items }, fn))),
+            .pipe(Effect.flatMap((items) => callback({ ...metadata(batch), items }, fn))),
         { json: true },
       );
     },

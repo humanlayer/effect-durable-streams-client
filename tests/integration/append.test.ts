@@ -1,10 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Data, Deferred, Effect, Exit, Fiber, Layer, Ref, Schema, Stream } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/unstable/http";
-import { DurableStreamsClient } from "../../src/index.js";
-import { AdapterState } from "../conformance/adapter-state.js";
-import { processLine } from "../conformance/adapter.js";
-import { acquireDurableStreamServer } from "../support/server.js";
+import { DurableStreamsClient } from "../../src/index";
+import { AdapterState } from "../conformance/adapter-state";
+import { processLine } from "../conformance/adapter";
+import { acquireDurableStreamServer } from "../support/server";
 
 class UploadFailed extends Data.TaggedError("UploadFailed") {}
 

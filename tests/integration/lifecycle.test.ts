@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/unstable/http";
-import { DurableStreamsClient, StreamLifetime, StreamMetadata } from "../../src/index.js";
-import { acquireDurableStreamServer } from "../support/server.js";
+import { DurableStreamsClient, StreamLifetime, StreamMetadata } from "../../src/index";
+import { acquireDurableStreamServer } from "../support/server";
 
 describe("reference server lifecycle round trips", () => {
   it.effect("creates, appends, reads back, closes and deletes byte/text/JSON streams", () =>

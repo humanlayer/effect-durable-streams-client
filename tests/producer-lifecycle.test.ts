@@ -2,9 +2,9 @@ import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Duration, Effect, Exit, Fiber, Queue, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClient } from "effect/unstable/http";
-import { DurableStreamsClient } from "../src/index.js";
-import { ScriptedResponse } from "./support/http-client.js";
-import { makeProducerHttp, producerReply } from "./support/producer-http.js";
+import { DurableStreamsClient } from "../src/index";
+import { ScriptedResponse } from "./support/http-client";
+import { makeProducerHttp, producerReply } from "./support/producer-http";
 
 describe("producer lifecycle", () => {
   it.effect("failed initial auto-claim keeps native restart in the delivery error channel", () =>

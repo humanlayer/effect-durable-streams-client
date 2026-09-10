@@ -22,18 +22,18 @@ import {
   ProducerSequenceGapError,
   ProtocolViolationError,
   type ProducerError,
-} from "./errors.js";
-import { combineAppendBodies, encodePayload, type PreparedBody } from "./encoding.js";
+} from "./errors";
+import { combineAppendBodies, encodePayload, type PreparedBody } from "./encoding";
 import {
   CloseResult,
   ProducerOptions,
   type ProducerAppendInput,
   type ProducerAppendResult,
   type ProducerCloseInput,
-} from "./model.js";
-import type { LifecycleContext } from "./lifecycle.js";
-import { ProducerResponse, sendProducerRequest, type ProducerRequest } from "./producer-request.js";
-import { freezeErrorResponse } from "./transport.js";
+} from "./model";
+import type { LifecycleContext } from "./lifecycle";
+import { ProducerResponse, sendProducerRequest, type ProducerRequest } from "./producer-request";
+import { freezeErrorResponse } from "./transport";
 
 export type IdempotentProducer<A, R = never> = {
   readonly append: (

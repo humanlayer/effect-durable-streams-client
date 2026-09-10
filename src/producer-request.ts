@@ -1,10 +1,10 @@
 import { Data, Effect, Match, Option, Predicate, Record, Schema } from "effect";
-import * as Errors from "./errors.js";
-import { ProducerAppendResult, type DurableStreamsConnection } from "./model.js";
-import { ProducerGapHeaders, ProducerNumber, ProducerSuccessHeaders } from "./protocol.js";
-import { freezeErrorResponse, protocolViolation, sendMutation } from "./transport.js";
-import { captureSchemaFailure } from "./encoding.js";
-import { isRequestMetadataFailure } from "./request.js";
+import * as Errors from "./errors";
+import { ProducerAppendResult, type DurableStreamsConnection } from "./model";
+import { ProducerGapHeaders, ProducerNumber, ProducerSuccessHeaders } from "./protocol";
+import { freezeErrorResponse, protocolViolation, sendMutation } from "./transport";
+import { captureSchemaFailure } from "./encoding";
+import { isRequestMetadataFailure } from "./request";
 
 export type ProducerResponse = Data.TaggedEnum<{
   Delivered: { readonly result: ProducerAppendResult };

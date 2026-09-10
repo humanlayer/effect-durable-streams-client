@@ -11,13 +11,13 @@ import {
   Stream,
   Schedule,
 } from "effect";
-import * as Errors from "./errors.js";
-import { captureSchemaFailure, decodeJson, allocateTextDecoder } from "./encoding.js";
-import type { DurableStreamsConnection, Offset } from "./model.js";
-import { LongPollEmptyHeaders, LongPollHeaders, ReadHeaders } from "./protocol.js";
-import { freezeErrorResponse, protocolViolation, sendReadRequest } from "./transport.js";
-import { decodeSseData, parseSse, SseEvent } from "./sse.js";
-import { waitForSseReconnect } from "./retry.js";
+import * as Errors from "./errors";
+import { captureSchemaFailure, decodeJson, allocateTextDecoder } from "./encoding";
+import type { DurableStreamsConnection, Offset } from "./model";
+import { LongPollEmptyHeaders, LongPollHeaders, ReadHeaders } from "./protocol";
+import { freezeErrorResponse, protocolViolation, sendReadRequest } from "./transport";
+import { decodeSseData, parseSse, SseEvent } from "./sse";
+import { waitForSseReconnect } from "./retry";
 import type { HttpClientResponse } from "effect/unstable/http";
 
 export type ReadBoundary = {

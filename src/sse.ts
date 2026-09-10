@@ -1,7 +1,7 @@
 import { Array as Arr, Data, Effect, Schema, Stream } from "effect";
-import { captureSchemaFailure, decodeText } from "./encoding.js";
-import { ProtocolViolationError } from "./errors.js";
-import { SseControl } from "./protocol.js";
+import { captureSchemaFailure, decodeText } from "./encoding";
+import { ProtocolViolationError } from "./errors";
+import { SseControl } from "./protocol";
 
 export type SseEvent = Data.TaggedEnum<{
   Data: { readonly data: string };

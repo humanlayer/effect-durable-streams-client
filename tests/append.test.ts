@@ -1,8 +1,8 @@
 import { describe, expect, expectTypeOf, it } from "@effect/vitest";
 import { Context, Effect, Layer, Match, Queue, Schema, SchemaGetter, Stream } from "effect";
 import type { HttpClient } from "effect/unstable/http";
-import { DurableStreamsClient, type DurableStreamsClientConfig } from "../src/index.js";
-import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.js";
+import { DurableStreamsClient, type DurableStreamsClientConfig } from "../src/index";
+import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client";
 
 describe("unbatched encoding", () => {
   it.effect("preserves declared configs and HTTP-only contextual writes", () =>

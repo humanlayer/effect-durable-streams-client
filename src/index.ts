@@ -8,7 +8,7 @@ import {
   type DeleteError,
   type HeadError,
   type ReadError,
-} from "./errors.js";
+} from "./errors";
 import {
   DurableStreamsConnection,
   type DurableStreamsClientConfig,
@@ -22,18 +22,18 @@ import {
   type CloseResult,
   type CreateResult,
   type StreamMetadata,
-} from "./model.js";
-import { inspectStream } from "./transport.js";
-import { checkExtensions } from "./request.js";
-import { closeStream, createStream, deleteStream } from "./lifecycle.js";
-import { allocateRead } from "./read.js";
-import { appendSource, allocateOrdinaryAppends } from "./append.js";
-import { acquireProducer, type IdempotentProducer } from "./producer.js";
-import type { ProducerOptions } from "./model.js";
-export type { IdempotentProducer } from "./producer.js";
+} from "./model";
+import { inspectStream } from "./transport";
+import { checkExtensions } from "./request";
+import { closeStream, createStream, deleteStream } from "./lifecycle";
+import { allocateRead } from "./read";
+import { appendSource, allocateOrdinaryAppends } from "./append";
+import { acquireProducer, type IdempotentProducer } from "./producer";
+import type { ProducerOptions } from "./model";
+export type { IdempotentProducer } from "./producer";
 
-export * from "./model.js";
-export * from "./errors.js";
+export * from "./model";
+export * from "./errors";
 
 export type Client<S extends Schema.Top, A = S["Type"]> = {
   readonly producer: (

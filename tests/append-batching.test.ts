@@ -16,8 +16,8 @@ import {
 } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { TestClock } from "effect/testing";
-import { DurableStreamsClient } from "../src/index.js";
-import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.js";
+import { DurableStreamsClient } from "../src/index";
+import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client";
 
 const setup = Effect.gen(function* () {
   const http = yield* makeScriptedHttpClient;

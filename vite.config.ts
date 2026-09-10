@@ -17,6 +17,15 @@ export default defineConfig({
     extends: [recommended],
     overrides: [
       {
+        files: [
+          "src/async-await.ts",
+          "src/client-runtime.ts",
+          "src/client-response.ts",
+          "src/client-errors.ts",
+        ],
+        rules: { "automation/private-function-prefix": "off" },
+      },
+      {
         files: ["src/async-await.ts", "src/client-runtime.ts", "src/client-response.ts"],
         rules: {
           "effecttsgo/async-function": "off",

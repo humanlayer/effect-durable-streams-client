@@ -24,13 +24,13 @@ import {
   StreamUnavailableError,
   UnauthorizedError,
   type HeadError,
-} from "./errors.js";
-import { StreamMetadata, type DurableStreamsConnection } from "./model.js";
-import { parseHeadMetadata } from "./protocol.js";
-import { buildRequest, isRequestMetadataFailure, type RequestInput } from "./request.js";
-import { parseRetryAfter, requestRetrySchedule } from "./retry.js";
-import * as Errors from "./errors.js";
-import { captureSchemaFailure } from "./encoding.js";
+} from "./errors";
+import { StreamMetadata, type DurableStreamsConnection } from "./model";
+import { parseHeadMetadata } from "./protocol";
+import { buildRequest, isRequestMetadataFailure, type RequestInput } from "./request";
+import { parseRetryAfter, requestRetrySchedule } from "./retry";
+import * as Errors from "./errors";
+import { captureSchemaFailure } from "./encoding";
 
 class HeadTransportFailure extends Data.TaggedError("HeadTransportFailure")<{
   readonly cause: HttpClientError.HttpClientError;

@@ -1,4 +1,4 @@
-import type { ViolationSeverity } from "./diff-check.js";
+import type { ViolationSeverity } from "./diff-check";
 
 export type ChangedFileMatcher =
   | {

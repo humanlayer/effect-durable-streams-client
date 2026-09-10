@@ -3,9 +3,9 @@ import path from "node:path";
 import fg from "fast-glob";
 import * as ts from "typescript-compiler";
 
-import type { ResolvedConfig } from "./config.js";
-import { typedRules, workspaceRules } from "./registry.js";
-import type { RuleDiagnostic } from "./rule.js";
+import type { ResolvedConfig } from "./config";
+import { typedRules, workspaceRules } from "./registry";
+import type { RuleDiagnostic } from "./rule";
 
 export type RunResult = {
   diagnostics: readonly RuleDiagnostic[];

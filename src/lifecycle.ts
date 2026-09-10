@@ -1,12 +1,7 @@
 import { Effect, Match, Option, Predicate, Record, Schema } from "effect";
 import type { HttpClient } from "effect/unstable/http";
-import * as Errors from "./errors.js";
-import {
-  captureSchemaFailure,
-  encodePayload,
-  encodePayloads,
-  type PreparedBody,
-} from "./encoding.js";
+import * as Errors from "./errors";
+import { captureSchemaFailure, encodePayload, encodePayloads, type PreparedBody } from "./encoding";
 import {
   AppendResult,
   CloseResult,
@@ -17,17 +12,17 @@ import {
   type CloseInput,
   type CreateInput,
   type DurableStreamsConnection,
-} from "./model.js";
-import { parseHeadMetadata, WriteHeaders } from "./protocol.js";
+} from "./model";
+import { parseHeadMetadata, WriteHeaders } from "./protocol";
 import {
   freezeErrorResponse,
   protocolViolation,
   sendMutation,
   type MutationFailure,
-} from "./transport.js";
-import { FieldValue } from "./headers.js";
+} from "./transport";
+import { FieldValue } from "./headers";
 import type { Stream } from "effect";
-import { isRequestMetadataFailure } from "./request.js";
+import { isRequestMetadataFailure } from "./request";
 
 const _commonRejection = (failure: MutationFailure) => {
   if (failure.cause !== undefined && isRequestMetadataFailure(failure.cause))

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Queue, Stream } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/unstable/http";
-import { DurableStreamsClient } from "../../src/index.js";
-import { acquireDurableStreamServer } from "../support/server.js";
+import { DurableStreamsClient } from "../../src/index";
+import { acquireDurableStreamServer } from "../support/server";
 
 describe("reference server producer", () => {
   it.effect(

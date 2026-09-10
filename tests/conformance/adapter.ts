@@ -19,15 +19,15 @@ import {
 } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import type { TestResult } from "@durable-streams/client-conformance-tests/protocol";
-import { DurableStreamsClient, StreamLifetime, StreamMetadata } from "../../src/index.js";
-import { AdapterState } from "./adapter-state.js";
-import { readLive } from "./adapter-live-read.js";
+import { DurableStreamsClient, StreamLifetime, StreamMetadata } from "../../src/index";
+import { AdapterState } from "./adapter-state";
+import { readLive } from "./adapter-live-read";
 import {
   ProducerCommand,
   ValidateCommand,
   handleProducer,
   validateOptions,
-} from "./adapter-producer.js";
+} from "./adapter-producer";
 
 export class AdapterInputError extends Data.TaggedError("AdapterInputError")<{
   readonly cause: unknown;

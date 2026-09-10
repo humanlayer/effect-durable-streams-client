@@ -1,8 +1,8 @@
 import { Data, Effect, Predicate, Record, Schema, Stream } from "effect";
 import { HttpClientRequest } from "effect/unstable/http";
-import { InvalidDurableStreamsConfigError } from "./errors.js";
-import type { DurableStreamsConnection } from "./model.js";
-import { FieldValue } from "./headers.js";
+import { InvalidDurableStreamsConfigError } from "./errors";
+import type { DurableStreamsConnection } from "./model";
+import { FieldValue } from "./headers";
 
 const RESERVED_PARAMS = new Set(["offset", "live", "cursor"]);
 

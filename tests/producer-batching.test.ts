@@ -11,10 +11,10 @@ import {
   Stream,
 } from "effect";
 import { TestClock } from "effect/testing";
-import { DurableStreamsClient } from "../src/index.js";
-import { makeProducerHttp, producerReply } from "./support/producer-http.js";
-import { acquireProducer } from "../src/producer.js";
-import { prepareSerializedBody } from "../src/encoding.js";
+import { DurableStreamsClient } from "../src/index";
+import { makeProducerHttp, producerReply } from "./support/producer-http";
+import { acquireProducer } from "../src/producer";
+import { prepareSerializedBody } from "../src/encoding";
 
 describe("producer batching", () => {
   it.effect(

@@ -6,7 +6,7 @@ import {
 	isKnownEvidenceExpression,
 	type TypeEnvironment,
 	type WideningTarget,
-} from "../shared/dictionary-types.js";
+} from "../shared/dictionary-types";
 
 import type { ESTree, Scope, SourceCode, Variable } from "@oxlint/plugins";
 

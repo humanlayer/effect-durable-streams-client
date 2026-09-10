@@ -14,8 +14,8 @@ import {
   Stream,
 } from "effect";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http";
-import { DurableStreamsClient, ErrorResponseBody, type ReadError } from "../src/index.js";
-import { makeReadHttp, readReply } from "./support/read-http.js";
+import { DurableStreamsClient, ErrorResponseBody, type ReadError } from "../src/index";
+import { makeReadHttp, readReply } from "./support/read-http";
 
 describe("catch-up codecs and errors", () => {
   it.effect(

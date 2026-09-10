@@ -1,10 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Match, Option, Queue, Stream } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/unstable/http";
-import { DurableStreamsClient } from "../../src/index.js";
-import { acquireDurableStreamServer } from "../support/server.js";
-import { AdapterState } from "../conformance/adapter-state.js";
-import { handleCommand } from "../conformance/adapter.js";
+import { DurableStreamsClient } from "../../src/index";
+import { acquireDurableStreamServer } from "../support/server";
+import { AdapterState } from "../conformance/adapter-state";
+import { handleCommand } from "../conformance/adapter";
 
 describe("reference server SSE", () => {
   for (const contentType of ["text/plain", "application/json", "application/octet-stream"]) {

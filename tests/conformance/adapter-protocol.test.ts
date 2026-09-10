@@ -3,9 +3,9 @@ import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { FetchHttpClient } from "effect/unstable/http";
-import { acquireDurableStreamServer } from "../support/server.js";
-import { AdapterState } from "./adapter-state.js";
-import { AdapterCommand, processLine } from "./adapter.js";
+import { acquireDurableStreamServer } from "../support/server";
+import { AdapterState } from "./adapter-state";
+import { AdapterCommand, processLine } from "./adapter";
 
 export type AdapterInvocation = {
   readonly commands: ReadonlyArray<AdapterCommand>;

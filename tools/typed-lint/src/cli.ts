@@ -3,8 +3,8 @@ import fs from "node:fs";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { loadConfig } from "./config.js";
-import { formatDiagnostic, runTypedLint } from "./engine.js";
+import { loadConfig } from "./config";
+import { formatDiagnostic, runTypedLint } from "./engine";
 
 type CliOptions = {
   command: "check" | "fix";

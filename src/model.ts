@@ -1,5 +1,5 @@
 import { DateTime, Duration, Option, Schema, type Stream } from "effect";
-import { FieldValue } from "./headers.js";
+import { FieldValue } from "./headers";
 
 export const Offset = Schema.NonEmptyString.check(Schema.isPattern(/^[^\s,&=?/]+$/));
 export type Offset = typeof Offset.Type;

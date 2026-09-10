@@ -1,9 +1,9 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Array as Arr, Deferred, Effect, Fiber, Queue, Ref, Stream } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
-import { DurableStreamsClient } from "../src/index.js";
-import { ScriptedResponse } from "./support/http-client.js";
-import { makeProducerHttp, producerReply } from "./support/producer-http.js";
+import { DurableStreamsClient } from "../src/index";
+import { ScriptedResponse } from "./support/http-client";
+import { makeProducerHttp, producerReply } from "./support/producer-http";
 
 describe("producer protocol recovery", () => {
   it.effect(

@@ -6,9 +6,9 @@ export {
   type ResolvedRuleSetting,
   type RuleSetting,
   type TypedLintConfig,
-} from "./config.js";
-export { discoverProjects, formatDiagnostic, runTypedLint, type RunResult } from "./engine.js";
-export { ruleNames, typedRules, workspaceRules, type RuleName } from "./registry.js";
+} from "./config";
+export { discoverProjects, formatDiagnostic, runTypedLint, type RunResult } from "./engine";
+export { ruleNames, typedRules, workspaceRules, type RuleName } from "./registry";
 export type {
   RuleContext,
   RuleDiagnostic,
@@ -16,4 +16,4 @@ export type {
   TypedRule,
   WorkspaceRule,
   WorkspaceRuleContext,
-} from "./rule.js";
+} from "./rule";

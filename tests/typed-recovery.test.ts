@@ -14,8 +14,8 @@ import {
   type StreamUnavailableError,
   type HeadError,
   type UnauthorizedError,
-} from "../src/index.js";
-import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.js";
+} from "../src/index";
+import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client";
 
 describe("application recovery through the public root API", () => {
   it.effect("narrows only handled tags and preserves ambient HTTP requirements", () =>

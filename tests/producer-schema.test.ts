@@ -14,9 +14,9 @@ import {
   Stream,
 } from "effect";
 import type { HttpClient } from "effect/unstable/http";
-import { DurableStreamsClient } from "../src/index.js";
-import { ScriptedResponse } from "./support/http-client.js";
-import { makeProducerHttp, producerReply } from "./support/producer-http.js";
+import { DurableStreamsClient } from "../src/index";
+import { ScriptedResponse } from "./support/http-client";
+import { makeProducerHttp, producerReply } from "./support/producer-http";
 
 describe("producer schema and dependencies", () => {
   it.effect(

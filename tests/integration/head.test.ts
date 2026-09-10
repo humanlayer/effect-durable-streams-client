@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/unstable/http";
-import { DurableStreamsClient, StreamMetadata } from "../../src/index.js";
-import { acquireDurableStreamServer } from "../support/server.js";
+import { DurableStreamsClient, StreamMetadata } from "../../src/index";
+import { acquireDurableStreamServer } from "../support/server";
 
 describe("reference server HEAD/connect", () => {
   it.effect("inspects an existing stream through the real HTTP boundary", () =>

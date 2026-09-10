@@ -1,6 +1,6 @@
 import { Deferred, Effect, Layer, Logger, Match, Queue, References } from "effect";
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http";
-import { ScriptedResponse } from "./http-client.js";
+import { ScriptedResponse } from "./http-client";
 
 export const producerReply = (input: {
   readonly seq: number;

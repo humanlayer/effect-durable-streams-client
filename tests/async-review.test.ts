@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Context, Deferred, Effect, Exit, Fiber, Schema, Scope } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
-import { DurableStream, IdempotentProducer, makeEffectClient } from "../src/async-await.js";
+import { DurableStream, IdempotentProducer, makeEffectClient } from "../src/async-await";
 
 const _gate = <A>() => {
   const deferred = Deferred.makeUnsafe<A>();

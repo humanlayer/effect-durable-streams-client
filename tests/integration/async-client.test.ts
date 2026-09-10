@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Array as Arr, Effect, Schema } from "effect";
-import { DurableStream, IdempotentProducer } from "../../src/async-await.js";
-import { acquireDurableStreamServer } from "../support/server.js";
+import { DurableStream, IdempotentProducer } from "../../src/async-await";
+import { acquireDurableStreamServer } from "../support/server";
 
 describe("async facade against reference server", () => {
   it.effect("follows SSE and long-poll through final payload and EOF", () =>

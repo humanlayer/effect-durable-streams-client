@@ -5,17 +5,17 @@ import {
   HttpClientError,
   HttpClientRequest,
 } from "effect/unstable/http";
-import { DurableStreamsConnection } from "./model.js";
-import { FieldValue } from "./headers.js";
-import { InvalidDurableStreamsConfigError } from "./errors.js";
-import { checkExtensions, RequestMetadataFailure } from "./request.js";
+import { DurableStreamsConnection } from "./model";
+import { FieldValue } from "./headers";
+import { InvalidDurableStreamsConfigError } from "./errors";
+import { checkExtensions, RequestMetadataFailure } from "./request";
 import {
   AbortError,
   InvalidClientOptionsError,
   mapClientErrors,
   unwrapClientExit,
   type NativeClientError,
-} from "./client-errors.js";
+} from "./client-errors";
 
 export type MaybePromise<A> = A | Promise<A>;
 export type HeadersRecord = Readonly<Record<string, string | (() => MaybePromise<string>)>>;
@@ -29,7 +29,7 @@ export type TransportOptions = {
   readonly signal?: AbortSignal;
 };
 
-const _fetchContext = Effect.runSync(Effect.scoped(Layer.build(FetchHttpClient.layer)));
+const fetchContext = Effect.runSync(Effect.scoped(Layer.build(FetchHttpClient.layer)));
 
 export const runClientSync = <A>(effect: Effect.Effect<A, NativeClientError>) =>
   unwrapClientExit(Effect.runSyncExit(mapClientErrors(effect)));
@@ -105,7 +105,7 @@ export type ClientOwner = {
   readonly pending: Set<Promise<void>>;
 };
 export const createClientRuntime = (options: TransportOptions) =>
-  createBoundRuntime({ options, context: _fetchContext, defaultFetch: true });
+  createBoundRuntime({ options, context: fetchContext, defaultFetch: true });
 export const createBoundRuntime = (input: {
   readonly options: TransportOptions;
   readonly context: Context.Context<HttpClient.HttpClient>;

@@ -13,8 +13,8 @@ import {
   Ref,
   Schema,
 } from "effect";
-import { DurableStreamsClient, ErrorResponseBody, StreamMetadata } from "../src/index.js";
-import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client.js";
+import { DurableStreamsClient, ErrorResponseBody, StreamMetadata } from "../src/index";
+import { makeScriptedHttpClient, ScriptedResponse } from "./support/http-client";
 
 describe("HEAD and connect", () => {
   it.effect("connect validates discovered JSON for schemas while head only inspects", () =>

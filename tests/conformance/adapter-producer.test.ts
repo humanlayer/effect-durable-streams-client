@@ -1,9 +1,9 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber, Layer, Queue } from "effect";
-import { AdapterState } from "./adapter-state.js";
-import { handleCommand } from "./adapter.js";
-import { makeProducerHttp, producerReply } from "../support/producer-http.js";
-import { ScriptedResponse } from "../support/http-client.js";
+import { AdapterState } from "./adapter-state";
+import { handleCommand } from "./adapter";
+import { makeProducerHttp, producerReply } from "../support/producer-http";
+import { ScriptedResponse } from "../support/http-client";
 
 describe("conformance producer adapter", () => {
   it.effect("retains cached producer sequences, JSON bodies and idempotent close", () =>

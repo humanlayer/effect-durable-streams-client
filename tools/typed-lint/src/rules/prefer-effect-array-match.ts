@@ -1,6 +1,6 @@
 import * as ts from "typescript-compiler";
 
-import type { RuleContext, TypedRule } from "../rule.js";
+import type { RuleContext, TypedRule } from "../rule";
 
 const _isNumberLiteral = ({ node, value }: { node: ts.Node; value: 0 | 1 }) =>
   ts.isNumericLiteral(node) && Number(node.text) === value;

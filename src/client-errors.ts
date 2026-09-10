@@ -1,5 +1,5 @@
 import { Cause, Duration, Effect, Exit, Option } from "effect";
-import type * as Native from "./errors.js";
+import type * as Native from "./errors";
 
 export type DurableStreamErrorCode =
   | "BAD_REQUEST"

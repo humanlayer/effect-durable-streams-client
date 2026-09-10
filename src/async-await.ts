@@ -10,18 +10,18 @@ import {
   Scope,
   Stream,
 } from "effect";
-import { PayloadEncodeError, InvalidDurableStreamsConfigError } from "./errors.js";
-import { allocateOrdinaryAppends, appendSource } from "./append.js";
-import { encodePayload, prepareSerializedBody, type PreparedBody } from "./encoding.js";
-import { closeStream, createStream, deleteStream } from "./lifecycle.js";
-import { inspectStream } from "./transport.js";
+import { PayloadEncodeError, InvalidDurableStreamsConfigError } from "./errors";
+import { allocateOrdinaryAppends, appendSource } from "./append";
+import { encodePayload, prepareSerializedBody, type PreparedBody } from "./encoding";
+import { closeStream, createStream, deleteStream } from "./lifecycle";
+import { inspectStream } from "./transport";
 import {
   ContentType,
   ProducerOptions,
   StreamLifetime,
   type DurableStreamsConnection,
-} from "./model.js";
-import { acquireProducer } from "./producer.js";
+} from "./model";
+import { acquireProducer } from "./producer";
 import {
   createClientRuntime,
   createBoundRuntime,
@@ -32,14 +32,14 @@ import {
   validateTransportOptions,
   type TransportOptions,
   type MaybePromise,
-} from "./client-runtime.js";
+} from "./client-runtime";
 import {
   DurableStreamError,
   InvalidClientOptionsError,
   mapClientErrors,
   unwrapClientExit,
-} from "./client-errors.js";
-import { decodeReadJson, openStreamResponse } from "./client-response.js";
+} from "./client-errors";
+import { decodeReadJson, openStreamResponse } from "./client-response";
 
 export {
   DurableStreamError,
@@ -49,9 +49,9 @@ export {
   StreamClosedError,
   StaleEpochError,
   SequenceGapError,
-} from "./client-errors.js";
-export type { DurableStreamErrorCode, ErrorResponseSnapshot } from "./client-errors.js";
-export type { HeadersRecord, ParamsRecord, MaybePromise } from "./client-runtime.js";
+} from "./client-errors";
+export type { DurableStreamErrorCode, ErrorResponseSnapshot } from "./client-errors";
+export type { HeadersRecord, ParamsRecord, MaybePromise } from "./client-runtime";
 export type {
   StreamResponse,
   BatchMeta,
@@ -59,7 +59,7 @@ export type {
   ByteChunk,
   TextChunk,
   ReadableStreamAsyncIterable,
-} from "./client-response.js";
+} from "./client-response";
 
 export type SerializedBody = string | Uint8Array;
 export type JsonValue = Schema.Json;
@@ -117,10 +117,10 @@ type Binding = {
   runtimeFor: (options: TransportOptions) => ReturnType<typeof createClientRuntime>;
   readonly append: Effect.Success<typeof allocateOrdinaryAppends>;
 };
-const _bindings = new WeakMap<DurableStream, Binding>();
+const bindings = new WeakMap<DurableStream, Binding>();
 
 export class DurableStream {
-  readonly #binding: Binding;
+  private readonly binding: Binding;
   constructor(options: DurableStreamOptions) {
     if (Object.hasOwn(options, "onError")) throw new InvalidClientOptionsError();
     const url = String(options.url);
@@ -130,7 +130,7 @@ export class DurableStream {
       headers: mergeHeaders(undefined, options.headers),
       params: { ...options.params },
     };
-    this.#binding = {
+    this.binding = {
       options: stored,
       connection: parseClientConnection({
         url,
@@ -142,13 +142,13 @@ export class DurableStream {
       runtimeFor: createClientRuntime,
       append: runClientSync(allocateOrdinaryAppends),
     };
-    _bindings.set(this, this.#binding);
+    bindings.set(this, this.binding);
   }
   get url() {
-    return this.#binding.connection.url.href;
+    return this.binding.connection.url.href;
   }
   get contentType() {
-    return this.#binding.connection.contentType;
+    return this.binding.connection.contentType;
   }
   static async create(options: CreateOptions) {
     const handle = new DurableStream(options);
@@ -167,16 +167,16 @@ export class DurableStream {
     return new DurableStream(options).delete();
   }
   async head(options: { readonly signal?: AbortSignal } = {}) {
-    const metadata = await this.#binding.runtime.run(
-      inspectStream({ connection: this.#binding.connection, operation: "head" }),
-      options.signal ?? this.#binding.options.signal,
+    const metadata = await this.binding.runtime.run(
+      inspectStream({ connection: this.binding.connection, operation: "head" }),
+      options.signal ?? this.binding.options.signal,
     );
     const result: HeadResult = Match.value(metadata).pipe(
       Match.tagsExhaustive({
         Missing: () => ({ exists: false as const }),
         Existing: (value) => {
-          this.#binding.connection = {
-            ...this.#binding.connection,
+          this.binding.connection = {
+            ...this.binding.connection,
             contentType: value.contentType,
           };
           return {
@@ -228,9 +228,9 @@ export class DurableStream {
               ),
             )
           : undefined;
-    const result = await this.#binding.runtime.run(
+    const result = await this.binding.runtime.run(
       createStream<typeof Schema.Json>({
-        connection: this.#binding.connection,
+        connection: this.binding.connection,
         input: {
           contentType,
           ...Record.filter({ closed: options.closed }, Predicate.isNotUndefined),
@@ -238,15 +238,15 @@ export class DurableStream {
         },
         ...Record.filter({ prepared }, Predicate.isNotUndefined),
       }),
-      this.#binding.options.signal,
+      this.binding.options.signal,
     );
-    this.#binding.connection = { ...this.#binding.connection, contentType: result.contentType };
+    this.binding.connection = { ...this.binding.connection, contentType: result.contentType };
     return this;
   }
   async delete(options: { readonly signal?: AbortSignal } = {}) {
-    await this.#binding.runtime.run(
-      deleteStream(this.#binding.connection),
-      options.signal ?? this.#binding.options.signal,
+    await this.binding.runtime.run(
+      deleteStream(this.binding.connection),
+      options.signal ?? this.binding.options.signal,
     );
   }
   async append(body: MaybePromise<SerializedBody>, options: AppendOptions = {}) {
@@ -256,25 +256,25 @@ export class DurableStream {
     const prepared = runClientSync(
       prepareSerializedBody({
         value: Predicate.isPromise(body)
-          ? await this.#binding.runtime.run(
+          ? await this.binding.runtime.run(
               Effect.tryPromise({
                 try: () => body,
                 catch: () => new PayloadEncodeError({ component: "append body" }),
               }),
-              options.signal ?? this.#binding.options.signal,
+              options.signal ?? this.binding.options.signal,
             )
           : body,
         contentType,
         complete: false,
       }),
     );
-    await this.#binding.runtime.run(
-      this.#binding.append<typeof Schema.Json>({
-        connection: this.#binding.connection,
+    await this.binding.runtime.run(
+      this.binding.append<typeof Schema.Json>({
+        connection: this.binding.connection,
         input: { value: null, ...Record.filter({ seq: options.seq }, Predicate.isNotUndefined) },
         prepared,
       }),
-      options.signal ?? this.#binding.options.signal,
+      options.signal ?? this.binding.options.signal,
     );
   }
   async close(options: CloseOptions = {}) {
@@ -285,13 +285,13 @@ export class DurableStream {
         : runClientSync(
             prepareSerializedBody({ value: options.body, contentType, complete: false }),
           );
-    return this.#binding.runtime.run(
+    return this.binding.runtime.run(
       closeStream<typeof Schema.Json>({
-        connection: this.#binding.connection,
+        connection: this.binding.connection,
         input: options.body === undefined ? {} : { value: null },
         prepared,
       }),
-      options.signal ?? this.#binding.options.signal,
+      options.signal ?? this.binding.options.signal,
     );
   }
   async appendStream(
@@ -314,20 +314,20 @@ export class DurableStream {
           source,
           () => new PayloadEncodeError({ component: "upload source" }),
         );
-    await this.#binding.runtime.run(
+    await this.binding.runtime.run(
       appendSource({
         connection: {
-          ...this.#binding.connection,
+          ...this.binding.connection,
           contentType,
         },
         hasSchema: false,
         input: { source: chunks, ...Record.filter({ seq: options.seq }, Predicate.isNotUndefined) },
       }),
-      options.signal ?? this.#binding.options.signal,
+      options.signal ?? this.binding.options.signal,
     );
   }
   async stream(options: ReadOptions = {}) {
-    return _openClientRead({
+    return openClientRead({
       handle: this,
       options,
       requireJson: options.json === true,
@@ -335,7 +335,7 @@ export class DurableStream {
     });
   }
   withSchema<S extends ServiceFreeSchema>(schema: S) {
-    return _specializeClient({ raw: this, schema, context: Context.empty() });
+    return specializeClient({ raw: this, schema, context: Context.empty() });
   }
   static withSchema<S extends ServiceFreeSchema>(
     options: DurableStreamOptions & { readonly schema: S },
@@ -382,19 +382,19 @@ export class DurableStream {
   }
 }
 
-const _openClientRead = async <A>(input: {
+const openClientRead = async <A>(input: {
   readonly handle: DurableStream;
   readonly options: ReadOptions;
   readonly requireJson: boolean;
   readonly decoder: (
-    batch: import("./read.js").ReadBatch,
-  ) => Effect.Effect<Array<A>, import("./errors.js").PayloadDecodeError>;
+    batch: import("./read").ReadBatch,
+  ) => Effect.Effect<Array<A>, import("./errors").PayloadDecodeError>;
 }) => {
   const { handle, options, requireJson, decoder } = input;
   if (Object.hasOwn(options, "onError")) throw new InvalidClientOptionsError();
   if (![undefined, false, true, "long-poll", "sse"].includes(options.live))
     throw new InvalidClientOptionsError();
-  const binding = _bindings.get(handle);
+  const binding = bindings.get(handle);
   if (binding === undefined) throw new InvalidClientOptionsError();
   const transport = {
     ...binding.options,
@@ -433,7 +433,7 @@ export type ServiceFreeSchema = Schema.Top & {
   readonly EncodingServices: never;
   readonly DecodingServices: never;
 };
-const _specializeClient = <S extends Schema.Top>(input: {
+const specializeClient = <S extends Schema.Top>(input: {
   readonly raw: DurableStream;
   readonly schema: S;
   readonly context: Context.Context<S["EncodingServices"] | S["DecodingServices"]>;
@@ -445,7 +445,7 @@ const _specializeClient = <S extends Schema.Top>(input: {
       raw.contentType.split(";")[0]?.trim().toLowerCase() !== "application/json")
   )
     throw new InvalidClientOptionsError();
-  const binding = _bindings.get(raw);
+  const binding = bindings.get(raw);
   if (binding === undefined) throw new InvalidClientOptionsError();
   const appendJson = async (value: S["Type"], options: AppendOptions = {}) => {
     const contentType = options.contentType ?? raw.contentType ?? "application/json";
@@ -484,7 +484,7 @@ const _specializeClient = <S extends Schema.Top>(input: {
       for (const value of values) await appendJson(value, options);
     },
     stream: (options: ReadOptions = {}) =>
-      _openClientRead({
+      openClientRead({
         handle: raw,
         options,
         requireJson: true,
@@ -503,7 +503,7 @@ export type TypedDurableStream<A> = {
   readonly close: DurableStream["close"];
   appendJson(value: A, options?: AppendOptions): Promise<void>;
   appendJsonBatch(values: ReadonlyArray<A>, options?: AppendOptions): Promise<void>;
-  stream(options?: ReadOptions): Promise<import("./client-response.js").StreamResponse<A>>;
+  stream(options?: ReadOptions): Promise<import("./client-response").StreamResponse<A>>;
 };
 type StaticTransport = {
   readonly headers?: Readonly<Record<string, string>>;
@@ -515,7 +515,7 @@ export type EffectReadOptions = Omit<ReadOptions, "fetch" | "headers" | "params"
 export type EffectRawClient = Omit<DurableStream, "stream" | "writable" | "withSchema"> & {
   stream(
     options?: EffectReadOptions,
-  ): Promise<import("./client-response.js").StreamResponse<JsonValue>>;
+  ): Promise<import("./client-response").StreamResponse<JsonValue>>;
 };
 export const makeEffectClient = <S extends Schema.Top>(
   options: EffectClientOptions & { readonly schema: S },
@@ -547,7 +547,7 @@ export const makeEffectClient = <S extends Schema.Top>(
         new DurableStream({ ...options, contentType: options.contentType ?? "application/json" }),
       catch: () => new InvalidClientOptionsError(),
     });
-    const binding = _bindings.get(raw);
+    const binding = bindings.get(raw);
     if (binding === undefined) return yield* Effect.die(new Error("Missing client binding"));
     binding.runtimeFor = (transport) => {
       if (
@@ -561,7 +561,7 @@ export const makeEffectClient = <S extends Schema.Top>(
     const client = yield* Effect.try({
       try: () => {
         binding.runtime = binding.runtimeFor(binding.options);
-        return _specializeClient({ raw, schema: options.schema, context });
+        return specializeClient({ raw, schema: options.schema, context });
       },
       catch: () => new InvalidClientOptionsError(),
     });
@@ -591,22 +591,22 @@ export type WritableOptions = Pick<
 
 type Coordinator = Effect.Success<ReturnType<typeof acquireProducer<typeof Schema.Json>>>;
 export class IdempotentProducer {
-  readonly #binding: Binding;
-  readonly #options: IdempotentProducerOptions;
-  readonly #input: ProducerOptions;
-  readonly #scope = Scope.makeUnsafe();
-  #coordinator: Coordinator | undefined;
-  #acquisition: Promise<Coordinator> | undefined;
-  #ingress = Promise.resolve();
-  #waiting = 0;
-  #closed = false;
-  #finalBody: PreparedBody | undefined;
-  #closeStarted = false;
-  readonly #abort = () => {
-    void this.#binding.runtime.closeScope(this.#scope);
+  private readonly binding: Binding;
+  private readonly options: IdempotentProducerOptions;
+  private readonly input: ProducerOptions;
+  private readonly scope = Scope.makeUnsafe();
+  private coordinator: Coordinator | undefined;
+  private acquisition: Promise<Coordinator> | undefined;
+  private ingress = Promise.resolve();
+  private waiting = 0;
+  private closed = false;
+  private finalBody: PreparedBody | undefined;
+  private closeStarted = false;
+  private readonly abort = () => {
+    void this.binding.runtime.closeScope(this.scope);
   };
   constructor(handle: DurableStream, producerId: string, options: IdempotentProducerOptions = {}) {
-    const binding = _bindings.get(handle);
+    const binding = bindings.get(handle);
     if (binding === undefined) throw new InvalidClientOptionsError();
     const transport = {
       ...binding.options,
@@ -615,21 +615,21 @@ export class IdempotentProducer {
       params: { ...binding.options.params, ...options.params },
     };
     validateTransportOptions({ ...transport, url: handle.url });
-    this.#binding = {
+    this.binding = {
       ...binding,
       get connection() {
         return binding.connection;
       },
       runtime: binding.runtimeFor(transport),
     };
-    this.#options = { ...options, signal: options.signal ?? binding.options.signal };
+    this.options = { ...options, signal: options.signal ?? binding.options.signal };
     if (
       (options.lingerMs !== undefined &&
         (!Number.isFinite(options.lingerMs) || options.lingerMs < 0)) ||
       (options.onError !== undefined && !Predicate.isFunction(options.onError))
     )
       throw new InvalidClientOptionsError();
-    this.#input = runClientSync(
+    this.input = runClientSync(
       ProducerOptions.makeEffect({
         producerId,
         ...Record.filter(
@@ -652,48 +652,48 @@ export class IdempotentProducer {
         ),
       ),
     );
-    this.#binding.runtime.own(this.#scope);
-    this.#options.signal?.addEventListener("abort", this.#abort, { once: true });
+    this.binding.runtime.own(this.scope);
+    this.options.signal?.addEventListener("abort", this.abort, { once: true });
   }
-  #acquire() {
-    this.#acquisition ??= this.#binding.runtime
+  private acquire() {
+    this.acquisition ??= this.binding.runtime
       .run(
         acquireProducer<typeof Schema.Json>({
-          connection: this.#binding.connection,
-          input: this.#input,
+          connection: this.binding.connection,
+          input: this.input,
           facade: {
-            contentType: () => this.#binding.connection.contentType ?? "application/octet-stream",
+            contentType: () => this.binding.connection.contentType ?? "application/octet-stream",
             onBatchExit: (exit) =>
               Effect.sync(() => {
                 if (Exit.isFailure(exit)) {
                   const mapped = Effect.runSyncExit(mapClientErrors(Effect.failCause(exit.cause)));
-                  this.#notify(mapped);
+                  this.notify(mapped);
                 }
               }),
           },
         }).pipe(
           Effect.tap((coordinator) =>
             Effect.sync(() => {
-              this.#coordinator = coordinator;
+              this.coordinator = coordinator;
             }),
           ),
-          Effect.provideService(Scope.Scope, this.#scope),
+          Effect.provideService(Scope.Scope, this.scope),
         ),
-        this.#options.signal,
+        this.options.signal,
       )
       .then((coordinator) => {
-        this.#coordinator = coordinator;
+        this.coordinator = coordinator;
         return coordinator;
       });
-    return this.#acquisition;
+    return this.acquisition;
   }
-  #notify(exit: Exit.Exit<never, DurableStreamError>) {
+  private notify(exit: Exit.Exit<never, DurableStreamError>) {
     try {
       unwrapClientExit(exit);
     } catch (error) {
       if (Predicate.isError(error) && error instanceof DurableStreamError) {
         try {
-          this.#options.onError?.(error);
+          this.options.onError?.(error);
         } catch {
           Effect.runSync(Effect.logWarning("Producer onError callback threw"));
         }
@@ -701,111 +701,111 @@ export class IdempotentProducer {
     }
   }
   append(body: SerializedBody) {
-    if (this.#closed) throw new DurableStreamError({ code: "ALREADY_CLOSED" });
+    if (this.closed) throw new DurableStreamError({ code: "ALREADY_CLOSED" });
     const prepared = runClientSync(
       prepareSerializedBody({
         value: body,
-        contentType: this.#binding.connection.contentType ?? "application/octet-stream",
+        contentType: this.binding.connection.contentType ?? "application/octet-stream",
         complete: false,
       }),
     );
-    const acquisition = this.#acquire();
-    if (this.#coordinator !== undefined && this.#waiting === 0) {
-      const admission = this.#binding.runtime.run(
-        this.#coordinator.admitPrepared(prepared),
-        this.#options.signal,
+    const acquisition = this.acquire();
+    if (this.coordinator !== undefined && this.waiting === 0) {
+      const admission = this.binding.runtime.run(
+        this.coordinator.admitPrepared(prepared),
+        this.options.signal,
       );
-      this.#ingress = Promise.all([this.#ingress, admission])
+      this.ingress = Promise.all([this.ingress, admission])
         .then(() => undefined)
         .catch((error) => {
-          if (error instanceof DurableStreamError) this.#notify(Exit.fail(error));
+          if (error instanceof DurableStreamError) this.notify(Exit.fail(error));
         });
       void acquisition.catch(() => undefined);
       return;
     }
-    this.#waiting++;
-    this.#ingress = this.#ingress
+    this.waiting++;
+    this.ingress = this.ingress
       .then(async () => {
         const coordinator = await acquisition;
-        await this.#binding.runtime.run(coordinator.admitPrepared(prepared), this.#options.signal);
+        await this.binding.runtime.run(coordinator.admitPrepared(prepared), this.options.signal);
       })
       .catch((error) => {
-        if (error instanceof DurableStreamError) this.#notify(Exit.fail(error));
+        if (error instanceof DurableStreamError) this.notify(Exit.fail(error));
       })
       .finally(() => {
-        this.#waiting--;
+        this.waiting--;
       });
   }
   async flush() {
     do {
-      await this.#ingress;
-      if (this.#coordinator !== undefined)
-        await this.#binding.runtime.run(this.#coordinator.flush, this.#options.signal);
+      await this.ingress;
+      if (this.coordinator !== undefined)
+        await this.binding.runtime.run(this.coordinator.flush, this.options.signal);
     } while (
-      this.#waiting > 0 ||
-      (this.#coordinator?.snapshot().pendingCount ?? 0) > 0 ||
-      (this.#coordinator?.snapshot().inFlightCount ?? 0) > 0
+      this.waiting > 0 ||
+      (this.coordinator?.snapshot().pendingCount ?? 0) > 0 ||
+      (this.coordinator?.snapshot().inFlightCount ?? 0) > 0
     );
   }
   async detach() {
-    if (this.#closed) return;
-    this.#closed = true;
+    if (this.closed) return;
+    this.closed = true;
     try {
       await this.flush();
     } catch {
       Effect.runSync(Effect.logWarning("Producer detach drain failed"));
     } finally {
-      if (this.#coordinator !== undefined)
-        await this.#binding.runtime.run(this.#coordinator.releaseWorkers);
-      this.#options.signal?.removeEventListener("abort", this.#abort);
+      if (this.coordinator !== undefined)
+        await this.binding.runtime.run(this.coordinator.releaseWorkers);
+      this.options.signal?.removeEventListener("abort", this.abort);
     }
   }
   async close(finalMessage?: SerializedBody) {
-    const alreadyClosed = this.#closed;
-    if (!this.#closeStarted) {
-      this.#finalBody =
+    const alreadyClosed = this.closed;
+    if (!this.closeStarted) {
+      this.finalBody =
         finalMessage === undefined || alreadyClosed
           ? undefined
           : runClientSync(
               prepareSerializedBody({
                 value: finalMessage,
-                contentType: this.#binding.connection.contentType ?? "application/octet-stream",
+                contentType: this.binding.connection.contentType ?? "application/octet-stream",
                 complete: false,
               }),
             );
-      this.#closeStarted = true;
+      this.closeStarted = true;
     }
-    this.#closed = true;
+    this.closed = true;
     await this.flush();
-    const coordinator = await this.#acquire();
+    const coordinator = await this.acquire();
     try {
-      return await this.#binding.runtime.run(
-        coordinator.closePrepared(this.#finalBody),
-        this.#options.signal,
+      return await this.binding.runtime.run(
+        coordinator.closePrepared(this.finalBody),
+        this.options.signal,
       );
     } finally {
-      await this.#binding.runtime.run(coordinator.releaseWorkers);
-      this.#options.signal?.removeEventListener("abort", this.#abort);
+      await this.binding.runtime.run(coordinator.releaseWorkers);
+      this.options.signal?.removeEventListener("abort", this.abort);
     }
   }
   async restart() {
     await this.flush();
-    const coordinator = await this.#acquire();
-    await this.#binding.runtime.run(coordinator.restart, this.#options.signal);
+    const coordinator = await this.acquire();
+    await this.binding.runtime.run(coordinator.restart, this.options.signal);
   }
   get epoch() {
-    return this.#coordinator?.snapshot().epoch ?? this.#input.epoch ?? 0;
+    return this.coordinator?.snapshot().epoch ?? this.input.epoch ?? 0;
   }
   get nextSeq() {
-    return this.#coordinator?.snapshot().nextSeq ?? 0;
+    return this.coordinator?.snapshot().nextSeq ?? 0;
   }
   get pendingCount() {
-    return this.#waiting + (this.#coordinator?.snapshot().pendingCount ?? 0);
+    return this.waiting + (this.coordinator?.snapshot().pendingCount ?? 0);
   }
   get inFlightCount() {
-    return this.#coordinator?.snapshot().inFlightCount ?? 0;
+    return this.coordinator?.snapshot().inFlightCount ?? 0;
   }
   get lastSuccessfulOffset() {
-    return this.#coordinator?.snapshot().lastSuccessfulOffset;
+    return this.coordinator?.snapshot().lastSuccessfulOffset;
   }
 }

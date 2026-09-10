@@ -2,7 +2,7 @@ import { NodeServices } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import { acquireDurableStreamServer } from "./support/server.js";
+import { acquireDurableStreamServer } from "./support/server";
 
 describe("published package", () => {
   it.effect(

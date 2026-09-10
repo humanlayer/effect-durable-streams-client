@@ -1,6 +1,6 @@
 import { Data, Effect, Match, Predicate, Schema, Stream, type SchemaIssue } from "effect";
-import { PayloadDecodeError, PayloadEncodeError } from "./errors.js";
-import { ContentType } from "./model.js";
+import { PayloadDecodeError, PayloadEncodeError } from "./errors";
+import { ContentType } from "./model";
 
 export type PreparedBody = {
   readonly contentType: string;

@@ -13,9 +13,9 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { HttpClient } from "effect/unstable/http";
-import { AdapterState } from "./adapter-state.js";
-import { handleCommand, processLine } from "./adapter.js";
-import { makeReadHttp, readReply } from "../support/read-http.js";
+import { AdapterState } from "./adapter-state";
+import { handleCommand, processLine } from "./adapter";
+import { makeReadHttp, readReply } from "../support/read-http";
 
 const _initialize = Effect.gen(function* () {
   yield* handleCommand({ type: "init", serverUrl: "https://streams.test" });

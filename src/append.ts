@@ -14,21 +14,21 @@ import {
   Stream,
 } from "effect";
 import type { HttpClient } from "effect/unstable/http";
-import { AppendOutcomeUnknownError, PayloadEncodeError, type AppendError } from "./errors.js";
+import { AppendOutcomeUnknownError, PayloadEncodeError, type AppendError } from "./errors";
 import {
   captureSchemaFailure,
   combineAppendBodies,
   encodePayload,
   type PreparedBody,
-} from "./encoding.js";
-import { FieldValue } from "./headers.js";
-import { appendStreamValue, type LifecycleContext } from "./lifecycle.js";
+} from "./encoding";
+import { FieldValue } from "./headers";
+import { appendStreamValue, type LifecycleContext } from "./lifecycle";
 import type {
   AppendInput,
   AppendResult,
   AppendStreamInput,
   DurableStreamsConnection,
-} from "./model.js";
+} from "./model";
 
 type Entry = {
   executionContext: Context.Context<HttpClient.HttpClient> | undefined;

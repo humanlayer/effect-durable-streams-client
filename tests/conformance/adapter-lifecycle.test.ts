@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer, Match, Queue } from "effect";
-import { AdapterState } from "./adapter-state.js";
-import { handleCommand } from "./adapter.js";
-import { makeScriptedHttpClient, ScriptedResponse } from "../support/http-client.js";
+import { AdapterState } from "./adapter-state";
+import { handleCommand } from "./adapter";
+import { makeScriptedHttpClient, ScriptedResponse } from "../support/http-client";
 
 describe("Phase 2 conformance adapter", () => {
   it.effect("sends serialized initial JSON envelopes unchanged in one closed PUT", () =>

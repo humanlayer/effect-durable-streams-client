@@ -8,7 +8,7 @@ import {
   InvalidClientOptionsError,
   makeEffectClient,
   stream,
-} from "../src/async-await.js";
+} from "../src/async-await";
 
 const _gate = <A>() => {
   const deferred = Deferred.makeUnsafe<A>();
@@ -142,7 +142,7 @@ describe("second full-artifact review", () => {
           ...Record.filter(
             {
               onError: throwing
-                ? (error: import("../src/async-await.js").DurableStreamError) => {
+                ? (error: import("../src/async-await").DurableStreamError) => {
                     errors.push(error.code);
                     throw new Error("callback");
                   }

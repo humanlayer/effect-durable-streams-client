@@ -9,7 +9,7 @@ import {
   propertyValue,
   setupCallFromCreateMachineCall,
   stringLiteralValue,
-} from "./xstate-single-use.js";
+} from "./xstate-single-use";
 
 type Rule = Parameters<RuleTester["run"]>[1];
 

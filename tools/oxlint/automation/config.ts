@@ -1,5 +1,5 @@
-import { allRules, profile } from "./profiles.js";
-import type { RuleProfile } from "./catalog.js";
+import { allRules, profile } from "./profiles";
+import type { RuleProfile } from "./catalog";
 
 export interface ConfigOptions {
   readonly namespace?: string;

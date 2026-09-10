@@ -1,7 +1,7 @@
 import { Duration, Effect, Exit, Match, Predicate, Record, Schema, Scope, Stream } from "effect";
 import type { TestResult } from "@durable-streams/client-conformance-tests/protocol";
-import { DurableStreamsClient } from "../../src/index.js";
-import { AdapterState } from "./adapter-state.js";
+import { DurableStreamsClient } from "../../src/index";
+import { AdapterState } from "./adapter-state";
 
 const ProducerIdentity = {
   path: Schema.String,

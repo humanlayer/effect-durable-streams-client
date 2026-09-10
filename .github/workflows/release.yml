@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: npm install --global npm@^11.15.0
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          version: 0.3.0
+          run-install: false
+          node-manager: false
+      - name: Verify committed version and derive dist-tag
+        id: release
+        run: bash scripts/release-tag-info.sh
+      - run: vp install --frozen-lockfile
+      - run: vp run check
+      - run: vp run diff:check
+      - run: vp test
+      - run: vp run test:integration
+      - run: vp run test:conformance
+      - run: vp run build
+      - run: vp run test:package
+      - name: Ensure build did not rewrite tracked release inputs
+        run: git diff --exit-code
+      - name: Inspect publication
+        run: npm publish --dry-run --ignore-scripts --access public --tag "$DIST_TAG"
+        env:
+          DIST_TAG: ${{ steps.release.outputs.tag }}
+      - name: Publish using npm OIDC
+        run: npm publish --ignore-scripts --access public --tag "$DIST_TAG"
+        env:
+          DIST_TAG: ${{ steps.release.outputs.tag }}

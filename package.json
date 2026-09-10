@@ -1,33 +1,40 @@
 {
-  "name": "@humanlayer/template-library",
-  "version": "0.0.0",
-  "description": "A starter for creating a TypeScript package.",
-  "homepage": "https://github.com/author/library#readme",
+  "name": "@humanlayer/effect-durable-streams-client",
+  "version": "0.1.0-rc.1",
+  "description": "Effect-native Durable Streams client with typed streams, schemas, and scoped idempotent producers.",
+  "homepage": "https://github.com/humanlayer/effect-durable-streams-client#readme",
   "bugs": {
-    "url": "https://github.com/author/library/issues"
+    "url": "https://github.com/humanlayer/effect-durable-streams-client/issues"
   },
   "license": "MIT",
-  "author": "Author Name <author.name@mail.com>",
+  "author": "HumanLayer",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/author/library.git"
+    "url": "git+https://github.com/humanlayer/effect-durable-streams-client.git"
   },
   "files": [
     "dist"
   ],
   "type": "module",
   "exports": {
-    ".": "./dist/index.mjs",
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "tag": "rc"
   },
   "scripts": {
     "build": "vp pack",
     "dev": "vp pack --watch",
     "test": "vp test",
     "test:integration": "vp test tests/integration",
+    "test:package": "vp test tests/package.test.ts",
+    "release:tag-info": "bash scripts/release-tag-info.sh",
     "test:conformance": "vp exec client-conformance-tests --run ./tests/conformance/run-adapter.sh",
     "check": "vp check && bun run typed",
     "typed": "node --import tsx tools/typed-lint/src/cli.ts check --config typed-lint.config.json",
@@ -65,7 +72,7 @@
     "packageManager": {
       "name": "bun",
       "version": "1.4.0",
-      "onFail": "download"
+      "onFail": "ignore"
     }
   }
 }

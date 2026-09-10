@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
+import packageJson from "../../package.json" with { type: "json" };
 import {
   Array as Arr,
   Data,
@@ -120,8 +121,8 @@ export const handleCommand = (command: AdapterCommand) =>
               ({
                 type: "init",
                 success: true,
-                clientName: "effect-durable-streams-client",
-                clientVersion: "0.0.0",
+                clientName: packageJson.name,
+                clientVersion: packageJson.version,
                 features: {
                   batching: true,
                   sse: true,

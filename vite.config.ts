@@ -9,7 +9,7 @@ export default defineConfig({
     dts: {
       tsgo: true,
     },
-    exports: true,
+    exports: false,
   },
   lint: {
     extends: [recommended],
@@ -147,11 +147,6 @@ export default defineConfig({
     categories: {
       correctness: "error",
       suspicious: "error",
-    },
-    settings: {
-      "better-tailwindcss": {
-        entryPoint: "./src/styles.css",
-      },
     },
   },
   fmt: {

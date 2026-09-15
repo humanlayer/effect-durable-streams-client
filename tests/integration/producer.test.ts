@@ -78,14 +78,13 @@ describe("reference server producer", () => {
       expect(failure._tag).toBe("StreamNotFoundError");
       expect((yield* Queue.take(responses)).status).toBe(404);
       yield* client.create({});
-      expect(yield* producer.append({ value: "gap" }).pipe(Effect.flip)).toBe(failure);
+      yield* producer.restart;
+      yield* producer.append({ value: "kept" });
       expect(yield* Queue.take(responses)).toMatchObject({
-        status: 409,
-        headers: { "producer-expected-seq": "0", "producer-received-seq": "1" },
+        status: 200,
+        headers: { "producer-epoch": "1", "producer-seq": "0" },
       });
-      const healthy = yield* client.producer({ producerId: "healthy", maxBatchBytes: 1 });
-      yield* healthy.append({ value: "kept" });
-      yield* healthy.detach;
+      yield* producer.detach;
       expect(yield* client.head).toMatchObject({ closed: false });
       expect(yield* client.text.pipe(Stream.runCollect)).toEqual(["kept"]);
     }).pipe(Effect.provide(FetchHttpClient.layer)),

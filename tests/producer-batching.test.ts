@@ -17,6 +17,59 @@ import { acquireProducer } from "../src/producer";
 import { prepareSerializedBody } from "../src/encoding";
 
 describe("producer batching", () => {
+  it.effect("offers sequential values without waiting and flushes them as one batch", () =>
+    Effect.gen(function* () {
+      const http = yield* makeProducerHttp;
+      yield* Effect.gen(function* () {
+        const client = yield* DurableStreamsClient.make({
+          url: "http://localhost/json",
+          contentType: "application/json",
+        });
+        const producer = yield* client.producer({
+          producerId: "p",
+          linger: Duration.hours(1),
+        });
+        yield* producer.offer({ value: 1 });
+        yield* producer.offer({ value: 2 });
+        yield* producer.offer({ value: 3 });
+        const flush = yield* producer.flush.pipe(Effect.forkChild);
+        const request = yield* Queue.take(http.requests);
+        expect(new TextDecoder().decode(request.body)).toBe("[1,2,3]");
+        yield* Deferred.succeed(request.reply, producerReply({ seq: 0 }));
+        yield* Fiber.join(flush);
+      }).pipe(Effect.provide(http.layer));
+    }),
+  );
+
+  it.effect("bounds admitted logical entries independently of HTTP concurrency", () =>
+    Effect.gen(function* () {
+      const http = yield* makeProducerHttp;
+      yield* Effect.gen(function* () {
+        const client = yield* DurableStreamsClient.make({ url: "http://localhost/text" });
+        const producer = yield* client.producer({
+          producerId: "p",
+          maxInFlight: 1,
+          maxBufferedEntries: 2,
+          linger: Duration.hours(1),
+        });
+        yield* producer.offer({ value: "a" });
+        yield* producer.offer({ value: "b" });
+        const blocked = yield* producer.offer({ value: "c" }).pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        expect(blocked.pollUnsafe()).toBeUndefined();
+        const first = yield* Queue.take(http.requests);
+        expect(new TextDecoder().decode(first.body)).toBe("ab");
+        yield* Deferred.succeed(first.reply, producerReply({ seq: 0 }));
+        yield* Fiber.join(blocked);
+        const flush = yield* producer.flush.pipe(Effect.forkChild);
+        const remaining = yield* Queue.take(http.requests);
+        expect(new TextDecoder().decode(remaining.body)).toBe("c");
+        yield* Deferred.succeed(remaining.reply, producerReply({ seq: 1 }));
+        yield* Fiber.join(flush);
+      }).pipe(Effect.provide(http.layer));
+    }),
+  );
+
   it.effect(
     "groups large homogeneous bursts at content-type boundaries without merging A/B/A",
     () =>

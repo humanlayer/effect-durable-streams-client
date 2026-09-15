@@ -36,6 +36,7 @@ import { ProducerResponse, sendProducerRequest, type ProducerRequest } from "./p
 import { freezeErrorResponse } from "./transport";
 
 export type IdempotentProducer<A, R = never> = {
+  readonly offer: (input: ProducerAppendInput<A>) => Effect.Effect<void, ProducerError, R>;
   readonly append: (
     input: ProducerAppendInput<A>,
   ) => Effect.Effect<ProducerAppendResult, ProducerError, R>;
@@ -98,6 +99,7 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
     closeBody: { readonly body?: Uint8Array } | undefined;
     closeResult: CloseResult | undefined;
     offset: string | undefined;
+    restartEpochFloor: number | undefined;
   };
   type SequenceProgress = {
     through: number;
@@ -117,6 +119,10 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
   const mutex = yield* Semaphore.make(1);
   const lifecycle = yield* Semaphore.make(1);
   const maxInFlight = options.maxInFlight ?? 5;
+  const bufferedEntries =
+    options.maxBufferedEntries === undefined
+      ? undefined
+      : yield* Semaphore.make(options.maxBufferedEntries);
   const tasks = yield* Queue.make<Batch>(
     context.facade === undefined ? { capacity: maxInFlight } : {},
   );
@@ -142,6 +148,7 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
     closeBody: undefined,
     closeResult: undefined,
     offset: undefined,
+    restartEpochFloor: undefined,
   };
   const outstanding = new Map<number, Entry>();
   const sequences = new Map<number, Deferred.Deferred<ProducerAppendResult, ProducerError>>();
@@ -157,31 +164,41 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
   const complete = (input: {
     readonly batch: Batch;
     readonly outcome: Exit.Exit<ProducerAppendResult, ProducerError>;
-  }) => {
-    if (
-      Exit.isFailure(input.outcome) &&
-      input.batch.tuple !== undefined &&
-      (progress.failure === undefined || input.batch.tuple.seq < progress.failure.seq)
-    )
-      progress.failure = { seq: input.batch.tuple.seq, exit: Exit.failCause(input.outcome.cause) };
-    Deferred.doneUnsafe(input.batch.completion, input.outcome);
-    batches.delete(input.batch);
-    for (const entry of input.batch.entries) {
-      outstanding.delete(entry.id);
-      Deferred.doneUnsafe(entry.receipt, input.outcome);
+  }) =>
+    Effect.sync(() => {
       if (
         Exit.isFailure(input.outcome) &&
-        (state.firstFailure === undefined || entry.id < state.firstFailure.id)
+        input.batch.tuple !== undefined &&
+        (progress.failure === undefined || input.batch.tuple.seq < progress.failure.seq)
       )
-        state.firstFailure = { id: entry.id, exit: Exit.failCause(input.outcome.cause) };
-    }
-    if (Exit.isSuccess(input.outcome)) recordOffset(input.outcome.value);
-    while (true) {
-      const next = sequences.get(progress.through + 1);
-      if (next === undefined || !Deferred.isDoneUnsafe(next)) break;
-      sequences.delete(++progress.through);
-    }
-  };
+        progress.failure = {
+          seq: input.batch.tuple.seq,
+          exit: Exit.failCause(input.outcome.cause),
+        };
+      Deferred.doneUnsafe(input.batch.completion, input.outcome);
+      batches.delete(input.batch);
+      for (const entry of input.batch.entries) {
+        outstanding.delete(entry.id);
+        Deferred.doneUnsafe(entry.receipt, input.outcome);
+        if (
+          Exit.isFailure(input.outcome) &&
+          (state.firstFailure === undefined || entry.id < state.firstFailure.id)
+        )
+          state.firstFailure = { id: entry.id, exit: Exit.failCause(input.outcome.cause) };
+      }
+      if (Exit.isSuccess(input.outcome)) recordOffset(input.outcome.value);
+      while (true) {
+        const next = sequences.get(progress.through + 1);
+        if (next === undefined || !Deferred.isDoneUnsafe(next)) break;
+        sequences.delete(++progress.through);
+      }
+    }).pipe(
+      Effect.andThen(
+        bufferedEntries === undefined
+          ? Effect.void
+          : bufferedEntries.release(input.batch.entries.length).pipe(Effect.andThen(Effect.void)),
+      ),
+    );
   const reserve = (batch: Batch) => {
     const tuple = { epoch: state.epoch, seq: state.nextSeq++ };
     batch.tuple = tuple;
@@ -200,11 +217,13 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
           Delivered: ({ result }) => Effect.succeed(Option.some(result)),
           Fenced: (fenced) =>
             Effect.gen(function* () {
-              if (!options.autoClaim || fenced.currentEpoch >= Number.MAX_SAFE_INTEGER)
+              if (!options.autoClaim || fenced.currentEpoch >= Number.MAX_SAFE_INTEGER) {
+                state.restartEpochFloor = fenced.currentEpoch + 1;
                 return yield* new ProducerFencedError({
                   currentEpoch: fenced.currentEpoch,
                   response: fenced.response,
                 });
+              }
               state.epoch = fenced.currentEpoch + 1;
               state.nextSeq = request.close ? 0 : 1;
               current.request = { ...request, epoch: state.epoch, seq: 0 };
@@ -283,7 +302,7 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
         }
         yield* Deferred.done(claim.current, Exit.isSuccess(outcome) ? Exit.void : outcome);
       }
-      complete({ batch, outcome });
+      yield* complete({ batch, outcome });
       if (context.facade !== undefined) yield* context.facade.onBatchExit(outcome);
     }
   });
@@ -316,15 +335,14 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
       batches.add(batch);
       yield* restore(Queue.offer(tasks, batch)).pipe(
         Effect.onExit((outcome) =>
-          Effect.sync(() => {
-            if (Exit.isFailure(outcome))
-              complete({ batch, outcome: Exit.failCause(outcome.cause) });
-          }),
+          Exit.isFailure(outcome)
+            ? complete({ batch, outcome: Exit.failCause(outcome.cause) })
+            : Effect.void,
         ),
       );
     }),
   );
-  const flush = mutex
+  const flushGeneration = mutex
     .withPermit(
       Effect.gen(function* () {
         const watermark = state.id;
@@ -358,6 +376,8 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
   ) =>
     Effect.gen(function* () {
       if (state.mode !== "open") return yield* new ProducerClosedError();
+      if (bufferedEntries !== undefined) yield* bufferedEntries.take(1);
+      let admitted = false;
       const body =
         input.prepared?.body ??
         (yield* encodePayload({
@@ -365,45 +385,61 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
           value: input.value,
           contentType,
           operation: "append",
-        }));
-      return yield* mutex.withPermit(
-        Effect.gen(function* () {
-          if (state.mode !== "open") return yield* new ProducerClosedError();
-          const entryContentType = input.prepared?.contentType ?? contentType;
-          const firstPending = state.pending[0];
-          if (firstPending !== undefined && firstPending.contentType !== entryContentType)
-            yield* emit;
-          const entry: Entry = {
-            id: ++state.id,
-            body,
-            contentType: entryContentType,
-            receipt: Deferred.makeUnsafe(),
-          };
-          outstanding.set(entry.id, entry);
-          state.pending.push(entry);
-          state.bytes +=
-            body.length -
-            (entryContentType.split(";")[0]?.trim().toLowerCase() === "application/json" ? 2 : 0);
-          if (state.bytes >= (options.maxBatchBytes ?? 1048576)) yield* emit;
-          else if (state.timer === undefined) {
-            const generation = state.generation;
-            state.timer = yield* Effect.sleep(options.linger ?? Duration.millis(5)).pipe(
-              Effect.andThen(
-                mutex.withPermit(
-                  Effect.gen(function* () {
-                    if (generation !== state.generation) return;
-                    state.timer = undefined;
-                    yield* emit;
-                  }),
+        }).pipe(
+          Effect.onError(() =>
+            bufferedEntries === undefined ? Effect.void : bufferedEntries.release(1),
+          ),
+        ));
+      return yield* mutex
+        .withPermit(
+          Effect.gen(function* () {
+            if (state.mode !== "open") return yield* new ProducerClosedError();
+            const entryContentType = input.prepared?.contentType ?? contentType;
+            const firstPending = state.pending[0];
+            if (firstPending !== undefined && firstPending.contentType !== entryContentType)
+              yield* emit;
+            const entry: Entry = {
+              id: ++state.id,
+              body,
+              contentType: entryContentType,
+              receipt: Deferred.makeUnsafe(),
+            };
+            outstanding.set(entry.id, entry);
+            admitted = true;
+            state.pending.push(entry);
+            state.bytes +=
+              body.length -
+              (entryContentType.split(";")[0]?.trim().toLowerCase() === "application/json" ? 2 : 0);
+            if (
+              state.bytes >= (options.maxBatchBytes ?? 1048576) ||
+              (options.maxBufferedEntries !== undefined &&
+                outstanding.size >= options.maxBufferedEntries)
+            )
+              yield* emit;
+            else if (state.timer === undefined) {
+              const generation = state.generation;
+              state.timer = yield* Effect.sleep(options.linger ?? Duration.millis(5)).pipe(
+                Effect.andThen(
+                  mutex.withPermit(
+                    Effect.gen(function* () {
+                      if (generation !== state.generation) return;
+                      state.timer = undefined;
+                      yield* emit;
+                    }),
+                  ),
                 ),
-              ),
-              Effect.forkIn(scope),
-            );
-          }
-          yield* Effect.logDebug("Producer append admitted");
-          return entry.receipt;
-        }),
-      );
+                Effect.forkIn(scope),
+              );
+            }
+            yield* Effect.logDebug("Producer append admitted");
+            return entry.receipt;
+          }),
+        )
+        .pipe(
+          Effect.onError(() =>
+            !admitted && bufferedEntries !== undefined ? bufferedEntries.release(1) : Effect.void,
+          ),
+        );
     }).pipe((effect) =>
       context.facade === undefined
         ? effect.pipe(Effect.raceFirst(Deferred.await(stopped)))
@@ -425,12 +461,36 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
       yield* Deferred.interrupt(stopped);
     }),
   );
+  const resetGeneration = Effect.gen(function* () {
+    const nextEpoch = Math.max(state.epoch + 1, state.restartEpochFloor ?? 0);
+    if (!Number.isSafeInteger(nextEpoch) || nextEpoch > Number.MAX_SAFE_INTEGER)
+      return yield* new ProtocolViolationError({ component: "producer epoch exhausted" });
+    state.epoch = nextEpoch;
+    state.restartEpochFloor = undefined;
+    state.nextSeq = 0;
+    if (state.closeResult === undefined) state.closeRequest = undefined;
+    progress.through = -1;
+    progress.failure = undefined;
+    sequences.clear();
+    claim.current = Deferred.makeUnsafe();
+    state.claimed = !options.autoClaim;
+    state.claiming = false;
+    state.firstFailure = undefined;
+    return undefined;
+  });
+  const flush = flushGeneration;
+  const offer = (input: ProducerAppendInput<S["Type"] | Uint8Array>) =>
+    admit({ value: input.value }).pipe(
+      Effect.andThen(Effect.void),
+      Effect.withSpan("durable_streams.producer.offer"),
+    );
   const append = (input: ProducerAppendInput<S["Type"] | Uint8Array>) =>
     admit({ value: input.value }).pipe(
       Effect.flatMap(Deferred.await),
       Effect.withSpan("durable_streams.producer.append"),
     );
   const producer: IdempotentProducer<S["Type"] | Uint8Array, S["EncodingServices"]> = {
+    offer,
     append,
     sink: Sink.forEach((value: S["Type"] | Uint8Array) =>
       Effect.suspend(() =>
@@ -443,7 +503,7 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
         Effect.gen(function* () {
           if (state.mode === "stopped") return yield* new ProducerClosedError();
           state.mode = "detached";
-          yield* flush;
+          yield* flushGeneration;
           return undefined;
         }),
       )
@@ -458,21 +518,12 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
               if (context.facade === undefined) state.mode = "closing";
             }),
           );
-          yield* flush;
-          if (state.epoch >= Number.MAX_SAFE_INTEGER)
-            return yield* new ProtocolViolationError({ component: "producer epoch exhausted" });
-          state.epoch++;
-          state.nextSeq = 0;
-          if (state.closeResult === undefined) state.closeRequest = undefined;
-          progress.through = -1;
-          progress.failure = undefined;
-          sequences.clear();
-          if (context.facade !== undefined) {
-            claim.current = Deferred.makeUnsafe();
-            state.claimed = !options.autoClaim;
-            state.claiming = false;
-            state.firstFailure = undefined;
-          }
+          yield* flushGeneration.pipe(
+            Effect.catch((failure) =>
+              Effect.logDebug("Restarting after failed producer generation", { failure }),
+            ),
+          );
+          yield* resetGeneration;
           if (context.facade === undefined) state.mode = "open";
           return undefined;
         }).pipe(
@@ -523,7 +574,7 @@ export const acquireProducer = Effect.fn("durable_streams.producer.make")(functi
             );
           }
           if (state.closeRequest === undefined) {
-            yield* flush;
+            yield* flushGeneration;
             state.closeRequest = {
               connection: context.connection,
               contentType:

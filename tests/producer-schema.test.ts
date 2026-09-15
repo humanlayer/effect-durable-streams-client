@@ -61,8 +61,10 @@ describe("producer schema and dependencies", () => {
         };
         const appendInput = { value: { id: "a" }, ...extra };
         const closeInput = { value: { id: "last" }, ...extra };
+        const offer = producer.offer(appendInput);
         const append = producer.append(appendInput);
         const close = producer.close(closeInput);
+        expectTypeOf<Effect.Services<typeof offer>>().toEqualTypeOf<Encoder>();
         expectTypeOf<Effect.Services<typeof append>>().toEqualTypeOf<Encoder>();
         expectTypeOf<Effect.Services<typeof close>>().toEqualTypeOf<Encoder>();
         const ingest = Stream.make({ id: "sink" }).pipe(Stream.run(producer.sink));

@@ -204,10 +204,13 @@ const producerProgram = Effect.gen(function* () {
     schema: Order,
   });
   yield* client.create({});
-  const producer = yield* client.producer({ producerId: "orders-writer", maxInFlight: 1 });
-  yield* Stream.make({ id: "order-2", quantity: 3 }, { id: "order-3", quantity: 4 }).pipe(
-    Stream.run(producer.sink),
-  );
+  const producer = yield* client.producer({
+    producerId: "orders-writer",
+    maxInFlight: 1,
+    maxBufferedEntries: 1024,
+  });
+  yield* producer.offer({ value: { id: "order-2", quantity: 3 } });
+  yield* producer.offer({ value: { id: "order-3", quantity: 4 } });
   yield* producer.flush;
   yield* producer.detach;
 }).pipe(Effect.scoped);
@@ -215,9 +218,11 @@ const producerProgram = Effect.gen(function* () {
 const producerMain = producerProgram.pipe(Effect.provide(FetchHttpClient.layer));
 ```
 
-Acquisition requires `Scope` and HTTP and captures that HTTP context for the producer lifetime; schema encoding services remain requirements of its writes/Sink. Defaults: epoch 0, autoClaim false, 1 MiB byte threshold, 5 ms linger, and 5 in-flight batches. The threshold is checked after insertion and can be exceeded by one unsplit value. Linger is not extended by arrivals.
+Acquisition requires `Scope` and HTTP and captures that HTTP context for the producer lifetime; schema encoding services remain requirements of its writes/Sink. Defaults: epoch 0, autoClaim false, 1 MiB byte threshold, 5 ms linger, and 5 in-flight batches. The threshold is checked after insertion and can be exceeded by one unsplit value. Linger is not extended by arrivals. `maxBufferedEntries` optionally bounds logical entries owned by the producer across pending, queued, and active batches; admission suspends when that bound is full.
 
-`producer.append({ value })` waits for accepted/deduplicated delivery. Sequentially awaiting every append limits batching; the Sink provides batched, backpressured ingestion over the same coordinator. `flush` waits through its admission watermark and reports failures. `detach` drains without remote closure; `close({})` drains and closes remotely; `restart` drains and advances the epoch. Scope finalization cancels unresolved work and joins cleanup—it does not initiate an unbounded flush or remote close. Interrupting an append receipt wait does not cancel already-admitted producer-owned delivery.
+`producer.offer({ value })` transfers a value to the producer and returns after bounded admission, allowing sequential event sources to use the producer's native batching without forking receipt fibers or adding another queue. Delivery failures are reported by `flush`. `producer.append({ value })` instead waits for accepted/deduplicated delivery. The Sink provides batched, backpressured ingestion over the same coordinator and flushes before it completes, so it does not require a second `flush` call.
+
+Delivery failures remain visible to `append`, `flush`, and the Sink until `restart` is called. `restart` drains the failed generation without replaying failed values, advances the epoch, resets sequence coordination, and makes the same producer ready for later writes. Callers do not need to replace producer objects, allocate new producer identities, or manage generation scopes. `detach` drains without remote closure; `close({})` drains and closes remotely. Scope finalization cancels unresolved work and joins cleanup—it does not initiate an unbounded flush or remote close. Interrupting an append receipt wait does not cancel already-admitted producer-owned delivery.
 
 Producer retries are **protocol recovery only** (auto-claim and local sequence-gap coordination), not ordinary transport/429/5xx backoff. Deduplication uses physical batches and retained server producer state, not logical event IDs. Do not assume a new producer with the same ID/epoch and different batching safely resumes an old writer.
 

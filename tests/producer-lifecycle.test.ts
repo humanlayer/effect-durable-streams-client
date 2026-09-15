@@ -7,7 +7,7 @@ import { ScriptedResponse } from "./support/http-client";
 import { makeProducerHttp, producerReply } from "./support/producer-http";
 
 describe("producer lifecycle", () => {
-  it.effect("failed initial auto-claim keeps native restart in the delivery error channel", () =>
+  it.effect("restart recovers a failed producer generation", () =>
     Effect.gen(function* () {
       const http = yield* makeProducerHttp;
       yield* Effect.gen(function* () {
@@ -25,10 +25,43 @@ describe("producer lifecycle", () => {
         );
         const failure = yield* Fiber.join(append).pipe(Effect.flip);
         expect(failure._tag).toBe("StreamUnavailableError");
-        expect(yield* producer.restart.pipe(Effect.flip)).toBe(failure);
-        expect(yield* producer.epoch).toBe(0);
-        expect(yield* producer.nextSeq).toBe(1);
-        expect(yield* Queue.size(http.requests)).toBe(0);
+        yield* producer.restart;
+        expect(yield* producer.epoch).toBe(1);
+        expect(yield* producer.nextSeq).toBe(0);
+        const next = yield* producer.append({ value: "b" }).pipe(Effect.forkChild);
+        const recovered = yield* Queue.take(http.requests);
+        expect(recovered.headers).toMatchObject({
+          "producer-epoch": "1",
+          "producer-seq": "0",
+        });
+        yield* Deferred.succeed(recovered.reply, producerReply({ seq: 0, epoch: 1 }));
+        yield* Fiber.join(next);
+      }).pipe(Effect.provide(http.layer));
+    }),
+  );
+  it.effect("restart advances beyond a server fencing epoch", () =>
+    Effect.gen(function* () {
+      const http = yield* makeProducerHttp;
+      yield* Effect.gen(function* () {
+        const client = yield* DurableStreamsClient.make({ url: "http://localhost/text" });
+        const producer = yield* client.producer({ producerId: "p", maxBatchBytes: 1 });
+        const append = yield* producer.append({ value: "a" }).pipe(Effect.forkChild);
+        const fenced = yield* Queue.take(http.requests);
+        yield* Deferred.succeed(
+          fenced.reply,
+          ScriptedResponse.Response({ status: 403, headers: { "producer-epoch": "9" } }),
+        );
+        expect((yield* Fiber.join(append).pipe(Effect.flip))._tag).toBe("ProducerFencedError");
+        yield* producer.restart;
+        expect(yield* producer.epoch).toBe(10);
+        const next = yield* producer.append({ value: "b" }).pipe(Effect.forkChild);
+        const recovered = yield* Queue.take(http.requests);
+        expect(recovered.headers).toMatchObject({
+          "producer-epoch": "10",
+          "producer-seq": "0",
+        });
+        yield* Deferred.succeed(recovered.reply, producerReply({ seq: 0, epoch: 10 }));
+        yield* Fiber.join(next);
       }).pipe(Effect.provide(http.layer));
     }),
   );

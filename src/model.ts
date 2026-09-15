@@ -135,6 +135,7 @@ export const ProducerOptions = Schema.Struct({
     ),
   ),
   maxInFlight: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
+  maxBufferedEntries: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
 });
 export type ProducerOptions = typeof ProducerOptions.Type;
 export type ProducerAppendInput<A> = { readonly value: A };

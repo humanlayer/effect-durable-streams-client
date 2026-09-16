@@ -99,12 +99,12 @@ export type ReadOptions = TransportOptions & {
   readonly sseResilience?: SSEResilienceOptions;
 };
 export type HeadResult =
-  | { readonly exists: false }
+  | { readonly exists: false; readonly state: "missing" }
   | {
       readonly exists: true;
+      readonly state: "empty" | "populated";
       readonly contentType: string;
       readonly offset: string;
-      readonly isEmpty: boolean;
       readonly streamClosed: boolean;
       readonly etag?: string;
       readonly cacheControl?: string;
@@ -174,7 +174,7 @@ export class DurableStream {
     );
     const result: HeadResult = Match.value(metadata).pipe(
       Match.tagsExhaustive({
-        Missing: () => ({ exists: false as const }),
+        Missing: () => ({ exists: false as const, state: "missing" as const }),
         Existing: (value) => {
           this.binding.connection = {
             ...this.binding.connection,
@@ -182,9 +182,9 @@ export class DurableStream {
           };
           return {
             exists: true as const,
+            state: value.state,
             contentType: value.contentType,
             offset: value.offset,
-            isEmpty: value.isEmpty,
             streamClosed: value.closed,
             ...Record.filter({ etag: value.etag }, Predicate.isNotUndefined),
             ...Record.filter({ cacheControl: value.cacheControl }, Predicate.isNotUndefined),

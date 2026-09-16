@@ -70,7 +70,7 @@ describe("reference server lifecycle round trips", () => {
           ),
         );
         yield* client.delete;
-        expect(yield* client.head).toEqual(StreamMetadata.cases.Missing.make({}));
+        expect(yield* client.head).toEqual(StreamMetadata.cases.Missing.make({ state: "missing" }));
       }
     }).pipe(Effect.provide(FetchHttpClient.layer)),
   );

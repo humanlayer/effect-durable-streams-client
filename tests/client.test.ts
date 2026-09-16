@@ -120,7 +120,7 @@ describe("construction and API types", () => {
             ),
           ),
         ),
-      ).toEqual(StreamMetadata.cases.Missing.make({}));
+      ).toEqual(StreamMetadata.cases.Missing.make({ state: "missing" }));
     }),
   );
 
@@ -268,7 +268,7 @@ describe("construction and API types", () => {
         }),
       );
       expect(yield* client.head.pipe(Effect.provide(first.layer))).toEqual(
-        StreamMetadata.cases.Missing.make({}),
+        StreamMetadata.cases.Missing.make({ state: "missing" }),
       );
       expect(yield* client.connect.pipe(Effect.provide(second.layer))).toMatchObject({
         offset: "opaque",

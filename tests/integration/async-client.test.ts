@@ -74,7 +74,7 @@ describe("async facade against reference server", () => {
       yield* Effect.promise(async () => {
         const url = `${baseUrl}/async-ordinary`;
         const missing = await DurableStream.connect({ url });
-        expect(await missing.head()).toEqual({ exists: false });
+        expect(await missing.head()).toEqual({ exists: false, state: "missing" });
         const handle = await DurableStream.create({
           url,
           contentType: "application/json",
@@ -93,7 +93,7 @@ describe("async facade against reference server", () => {
         expect(await second.json()).toEqual([1, 2, { x: 1 }, [3, 4], "done"]);
         expect(second.offset).toBe(final.finalOffset);
         await handle.delete();
-        expect(await handle.head()).toEqual({ exists: false });
+        expect(await handle.head()).toEqual({ exists: false, state: "missing" });
       });
     }),
   );

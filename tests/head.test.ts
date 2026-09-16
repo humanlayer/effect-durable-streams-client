@@ -50,7 +50,7 @@ describe("HEAD and connect", () => {
       }
       yield* http.respond(ScriptedResponse.Response({ status: 404, headers: {} }));
       expect(yield* client.connect.pipe(Effect.provide(http.layer))).toEqual(
-        StreamMetadata.cases.Missing.make({}),
+        StreamMetadata.cases.Missing.make({ state: "missing" }),
       );
     }),
   );
@@ -114,7 +114,7 @@ describe("HEAD and connect", () => {
         StreamMetadata.cases.Existing.make({
           contentType: "application/json",
           offset: "AbC_00-+:~",
-          isEmpty: false,
+          state: "populated",
           closed: true,
           ttlSeconds: 3600,
           expiresAt: "2030-01-01T00:00:00Z",
@@ -128,13 +128,13 @@ describe("HEAD and connect", () => {
     }),
   );
 
-  it.effect("reports whether an existing stream is empty without exposing offset semantics", () =>
+  it.effect("reports stream state without exposing offset semantics", () =>
     Effect.gen(function* () {
       const http = yield* makeScriptedHttpClient;
       const client = yield* DurableStreamsClient.make({ url: "https://streams.test/orders" });
-      for (const [offset, isEmpty] of [
-        ["0000000000000000_0000000000000000", true],
-        ["opaque", false],
+      for (const [offset, state] of [
+        ["0000000000000000_0000000000000000", "empty"],
+        ["opaque", "populated"],
       ] as const) {
         yield* http.respond(
           ScriptedResponse.Response({
@@ -143,8 +143,7 @@ describe("HEAD and connect", () => {
           }),
         );
         const metadata = yield* client.head.pipe(Effect.provide(http.layer));
-        expect(StreamMetadata.guards.Existing(metadata)).toBe(true);
-        if (StreamMetadata.guards.Existing(metadata)) expect(metadata.isEmpty).toBe(isEmpty);
+        expect(metadata.state).toBe(state);
       }
     }),
   );

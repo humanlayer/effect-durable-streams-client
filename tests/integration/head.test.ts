@@ -36,8 +36,10 @@ describe("reference server HEAD/connect", () => {
     Effect.gen(function* () {
       const { server, baseUrl } = yield* acquireDurableStreamServer;
       const client = yield* DurableStreamsClient.make({ url: `${baseUrl}/missing` });
-      expect(yield* client.head).toEqual(StreamMetadata.cases.Missing.make({}));
-      expect(yield* client.connect).toEqual(StreamMetadata.cases.Missing.make({}));
+      expect(yield* client.head).toEqual(StreamMetadata.cases.Missing.make({ state: "missing" }));
+      expect(yield* client.connect).toEqual(
+        StreamMetadata.cases.Missing.make({ state: "missing" }),
+      );
       expect(server.store.get("/missing")).toBeUndefined();
     }).pipe(Effect.provide(FetchHttpClient.layer)),
   );
@@ -48,7 +50,9 @@ describe("reference server HEAD/connect", () => {
         Effect.gen(function* () {
           const fixture = yield* acquireDurableStreamServer;
           const client = yield* DurableStreamsClient.make({ url: `${fixture.baseUrl}/missing` });
-          expect(yield* client.head).toEqual(StreamMetadata.cases.Missing.make({}));
+          expect(yield* client.head).toEqual(
+            StreamMetadata.cases.Missing.make({ state: "missing" }),
+          );
           return fixture.baseUrl;
         }),
       );

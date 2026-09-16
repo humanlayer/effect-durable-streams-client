@@ -45,7 +45,7 @@ describe("async lifecycle and serialized writes (phase B)", () => {
           },
         }),
     });
-    await expect(handle.head()).resolves.toMatchObject({ exists: true, isEmpty: true });
+    await expect(handle.head()).resolves.toMatchObject({ exists: true, state: "empty" });
   });
 
   it("is cold, rejects invalid configuration and keeps serialized lexemes", async () => {

@@ -104,6 +104,7 @@ export type HeadResult =
       readonly exists: true;
       readonly contentType: string;
       readonly offset: string;
+      readonly isEmpty: boolean;
       readonly streamClosed: boolean;
       readonly etag?: string;
       readonly cacheControl?: string;
@@ -183,6 +184,7 @@ export class DurableStream {
             exists: true as const,
             contentType: value.contentType,
             offset: value.offset,
+            isEmpty: value.isEmpty,
             streamClosed: value.closed,
             ...Record.filter({ etag: value.etag }, Predicate.isNotUndefined),
             ...Record.filter({ cacheControl: value.cacheControl }, Predicate.isNotUndefined),

@@ -33,6 +33,21 @@ const _gate = <A>() => {
 };
 
 describe("async lifecycle and serialized writes (phase B)", () => {
+  it("reports empty stream state without requiring offset interpretation", async () => {
+    const handle = new DurableStream({
+      url: "https://example.test/a",
+      fetch: async () =>
+        new Response(null, {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "stream-next-offset": "0000000000000000_0000000000000000",
+          },
+        }),
+    });
+    await expect(handle.head()).resolves.toMatchObject({ exists: true, isEmpty: true });
+  });
+
   it("is cold, rejects invalid configuration and keeps serialized lexemes", async () => {
     const bodies: Array<string> = [];
     const fetchClient: typeof fetch = async (_input, init) => {

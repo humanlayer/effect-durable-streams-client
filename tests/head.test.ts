@@ -114,6 +114,7 @@ describe("HEAD and connect", () => {
         StreamMetadata.cases.Existing.make({
           contentType: "application/json",
           offset: "AbC_00-+:~",
+          isEmpty: false,
           closed: true,
           ttlSeconds: 3600,
           expiresAt: "2030-01-01T00:00:00Z",
@@ -124,6 +125,27 @@ describe("HEAD and connect", () => {
       const request = yield* Queue.take(http.requests);
       expect(request.method).toBe("HEAD");
       expect(request.url).toBe("https://streams.test/orders?token=secret");
+    }),
+  );
+
+  it.effect("reports whether an existing stream is empty without exposing offset semantics", () =>
+    Effect.gen(function* () {
+      const http = yield* makeScriptedHttpClient;
+      const client = yield* DurableStreamsClient.make({ url: "https://streams.test/orders" });
+      for (const [offset, isEmpty] of [
+        ["0000000000000000_0000000000000000", true],
+        ["opaque", false],
+      ] as const) {
+        yield* http.respond(
+          ScriptedResponse.Response({
+            status: 200,
+            headers: { "content-type": "text/plain", "stream-next-offset": offset },
+          }),
+        );
+        const metadata = yield* client.head.pipe(Effect.provide(http.layer));
+        expect(StreamMetadata.guards.Existing(metadata)).toBe(true);
+        if (StreamMetadata.guards.Existing(metadata)) expect(metadata.isEmpty).toBe(isEmpty);
+      }
     }),
   );
 

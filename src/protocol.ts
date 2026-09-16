@@ -126,7 +126,7 @@ export const parseHeadMetadata = (input: ParseHeadInput) =>
     return yield* StreamMetadata.cases.Existing.makeEffect({
       contentType: headers["content-type"],
       offset: headers[NEXT_OFFSET],
-      state: headers[NEXT_OFFSET] === EMPTY_STREAM_OFFSET ? "empty" : "populated",
+      isEmpty: headers[NEXT_OFFSET] === EMPTY_STREAM_OFFSET,
       closed: headers[CLOSED] === "true",
       ...Record.filter(
         {

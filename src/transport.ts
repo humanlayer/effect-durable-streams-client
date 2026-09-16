@@ -137,7 +137,7 @@ export const inspectStream = (
         ),
         Effect.mapError((cause) => new HeadTransportFailure({ cause })),
       );
-    if (response.status === 404) return StreamMetadata.cases.Missing.make({ state: "missing" });
+    if (response.status === 404) return StreamMetadata.cases.Missing.make({});
     if (response.status !== 200) return yield* new HeadResponseFailure({ response });
     return yield* parseHeadMetadata({
       headers: response.headers,

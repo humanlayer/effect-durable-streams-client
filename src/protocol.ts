@@ -15,6 +15,7 @@ export const NEXT_OFFSET = "stream-next-offset";
 export const CLOSED = "stream-closed";
 export const TTL = "stream-ttl";
 export const EXPIRES_AT = "stream-expires-at";
+const EMPTY_STREAM_OFFSET = "0000000000000000_0000000000000000";
 
 export const WriteHeaders = Schema.Struct({
   "stream-next-offset": Offset.check(Schema.isPattern(/^(?!-1$|now$)/)),
@@ -125,6 +126,7 @@ export const parseHeadMetadata = (input: ParseHeadInput) =>
     return yield* StreamMetadata.cases.Existing.makeEffect({
       contentType: headers["content-type"],
       offset: headers[NEXT_OFFSET],
+      isEmpty: headers[NEXT_OFFSET] === EMPTY_STREAM_OFFSET,
       closed: headers[CLOSED] === "true",
       ...Record.filter(
         {

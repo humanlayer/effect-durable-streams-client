@@ -62,6 +62,7 @@ export const StreamMetadata = Schema.TaggedUnion({
   Existing: {
     contentType: ContentType,
     offset: Offset,
+    isEmpty: Schema.Boolean,
     closed: Schema.Boolean,
     etag: Schema.optionalKey(Schema.String),
     cacheControl: Schema.optionalKey(Schema.String),
